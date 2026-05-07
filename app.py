@@ -619,19 +619,61 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("<div class='sec'>◈ ENTER BATTERY MEASUREMENTS</div>", unsafe_allow_html=True)
+
     st.markdown("""
     <div class='icard'>
-        📌 Enter <strong>Voltage, Current and Temperature</strong>.
-        Power is auto-calculated and State is selected manually for practical accuracy.
+        ⚠️ <strong>Important Instructions for Accurate Prediction</strong><br><br>
+        • This system is designed specifically for <strong>reconditioned Nissan Leaf lithium-ion battery modules</strong>.<br>
+        • For <strong>discharging-based prediction</strong>, use a <strong>21 W load</strong> as the reference load condition.<br>
+        • If a higher load is required, use <strong>two 21 W loads connected in parallel</strong>.<br>
+        • For <strong>charging-based prediction</strong>, use a <strong>20 W solar panel</strong> as the reference charging source.<br>
+        • For more accurate prediction, complete one full charging or discharging cycle before entering values.<br>
+        • After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
     </div>
     """, unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
+    # =====================================================
+    # INITIAL PARAMETERS
+    # =====================================================
+    st.markdown("<div class='sec'>◈ INITIAL BATTERY CONDITIONS</div>", unsafe_allow_html=True)
 
-    with c1:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ VOLTAGE (V)</div>", unsafe_allow_html=True)
+    i1, i2, i3 = st.columns(3)
+
+    with i1:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ INITIAL VOLTAGE (V)</div>", unsafe_allow_html=True)
+        initial_voltage = st.number_input(
+            "Initial Voltage", min_value=6.0, max_value=8.2,
+            value=7.80, step=0.01, format="%.2f",
+            label_visibility="collapsed"
+        )
+
+    with i2:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 INITIAL CURRENT (A)</div>", unsafe_allow_html=True)
+        initial_current = st.number_input(
+            "Initial Current", min_value=0.0, max_value=10.0,
+            value=1.20, step=0.01, format="%.2f",
+            label_visibility="collapsed"
+        )
+
+    with i3:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ INITIAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
+        initial_temperature = st.number_input(
+            "Initial Temperature", min_value=0.0, max_value=80.0,
+            value=30.0, step=0.1, format="%.1f",
+            label_visibility="collapsed"
+        )
+
+    # =====================================================
+    # FINAL PARAMETERS
+    # =====================================================
+    st.markdown("<div class='sec'>◈ FINAL BATTERY CONDITIONS</div>", unsafe_allow_html=True)
+
+    f1, f2, f3 = st.columns(3)
+
+    with f1:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ FINAL VOLTAGE (V)</div>", unsafe_allow_html=True)
         voltage = st.number_input(
-            "Voltage", min_value=6.0, max_value=8.2,
+            "Final Voltage", min_value=6.0, max_value=8.2,
             value=7.40, step=0.01, format="%.2f",
             label_visibility="collapsed"
         )
@@ -646,24 +688,24 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    with c2:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 CURRENT (A)</div>", unsafe_allow_html=True)
+    with f2:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 FINAL CURRENT (A)</div>", unsafe_allow_html=True)
         current = st.number_input(
-            "Current", min_value=0.0, max_value=10.0,
+            "Final Current", min_value=0.0, max_value=10.0,
             value=1.20, step=0.01, format="%.2f",
             label_visibility="collapsed"
         )
         curr_color = "#ff6b35" if current > 0 else "#7ba7cc"
         st.markdown(f"""
         <div style='text-align:center;font-family:Share Tech Mono;font-size:0.78rem;color:{curr_color};margin-top:8px;background:rgba(0,0,0,0.2);border-radius:6px;padding:4px;'>
-            🔌 CURRENT INPUT | {current:.2f}A
+            🔌 FINAL CURRENT | {current:.2f}A
         </div>
         """, unsafe_allow_html=True)
 
-    with c3:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ TEMPERATURE (°C)</div>", unsafe_allow_html=True)
+    with f3:
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ FINAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
         temperature = st.number_input(
-            "Temperature", min_value=0.0, max_value=80.0,
+            "Final Temperature", min_value=0.0, max_value=80.0,
             value=35.0, step=0.1, format="%.1f",
             label_visibility="collapsed"
         )
@@ -675,23 +717,49 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<div class='sec'>◈ BATTERY OPERATING STATE</div>", unsafe_allow_html=True)
-    state_str = st.selectbox(
-        "Battery State",
-        ["DISCHARGING", "CHARGING"],
-        help="Select the actual operating state of the battery"
-    )
+    # =====================================================
+    # PROCESS INFORMATION
+    # =====================================================
+    st.markdown("<div class='sec'>◈ PROCESS INFORMATION</div>", unsafe_allow_html=True)
+
+    p1, p2 = st.columns(2)
+
+    with p1:
+        cycle_time = st.number_input(
+            "Charging / Discharging Time (Minutes)",
+            min_value=0.0,
+            max_value=10000.0,
+            value=60.0,
+            step=1.0,
+            format="%.1f",
+            help="Enter the time taken to complete the charging or discharging process."
+        )
+
+    with p2:
+        state_str = st.selectbox(
+            "Battery State",
+            ["DISCHARGING", "CHARGING"],
+            help="Select the actual operating state of the battery"
+        )
 
     power = round(voltage * current, 3)
     state_enc = 1 if state_str == "DISCHARGING" else 0
     cycle_count = 1
 
+    voltage_change = abs(initial_voltage - voltage)
+    temperature_change = temperature - initial_temperature
+    avg_current = (initial_current + current) / 2
+
     st.markdown(f"""
     <div class='icard' style='margin-top:1rem;'>
-        🔄 Auto-calculated: &nbsp;
+        🔄 <strong>Auto-calculated Parameters</strong><br><br>
         <strong style='color:#00d4ff;'>Power = {power:.2f}W</strong> &nbsp;|&nbsp;
         <strong style='color:#00ff9d;'>State = {state_str}</strong> &nbsp;|&nbsp;
-        <strong style='color:#7ba7cc;'>Voltage SoH ≈ {v_pct:.1f}%</strong>
+        <strong style='color:#7ba7cc;'>Voltage SoH ≈ {v_pct:.1f}%</strong><br><br>
+        📉 <strong style='color:#00d4ff;'>Voltage Change = {voltage_change:.2f}V</strong> &nbsp;|&nbsp;
+        🌡️ <strong style='color:#ff6b35;'>Temperature Change = {temperature_change:.1f}°C</strong> &nbsp;|&nbsp;
+        🔌 <strong style='color:#00ff9d;'>Average Current = {avg_current:.2f}A</strong> &nbsp;|&nbsp;
+        ⏱️ <strong style='color:#7ba7cc;'>Process Time = {cycle_time:.1f} min</strong>
     </div>
     """, unsafe_allow_html=True)
 
