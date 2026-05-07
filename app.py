@@ -635,25 +635,25 @@ with tab1:
     with tg1:
         st.info(
             "🔋 **Battery Type**\n\n"
-            "Use only for **reconditioned Nissan Leaf lithium-ion battery modules**."
+            "Use only for **Reconditioned Nissan Leaf lithium-ion Battery Modules**."
         )
 
     with tg2:
         st.warning(
             "⚡ **Discharging Test**\n\n"
-            "Use a **21 W load** as the reference load condition."
+            "Use a **21 W Load** as the Reference Load Condition."
         )
 
     with tg3:
         st.warning(
             "🔌 **Higher Load Option**\n\n"
-            "For higher load, connect **two 21 W loads in parallel**."
+            "For higher Load, Connect **Two 21 W loads in Parallel**."
         )
 
     with tg4:
         st.success(
             "☀️ **Charging Test**\n\n"
-            "Use a **20 W solar panel** as the reference charging source."
+            "Use a **20 W Solar Panel** as the Reference Charging Source."
         )
 
     st.markdown("""
