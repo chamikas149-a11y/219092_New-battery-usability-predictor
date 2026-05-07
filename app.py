@@ -621,14 +621,75 @@ with tab1:
     st.markdown("<div class='sec'>◈ ENTER BATTERY MEASUREMENTS</div>", unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='icard'>
-        ⚠️ <strong>Important Instructions for Accurate Prediction</strong><br><br>
-        • This system is designed specifically for <strong>reconditioned Nissan Leaf lithium-ion battery modules</strong>.<br>
-        • For <strong>discharging-based prediction</strong>, use a <strong>21 W load</strong> as the reference load condition.<br>
-        • If a higher load is required, use <strong>two 21 W loads connected in parallel</strong>.<br>
-        • For <strong>charging-based prediction</strong>, use a <strong>20 W solar panel</strong> as the reference charging source.<br>
-        • For more accurate prediction, complete one full charging or discharging cycle before entering values.<br>
-        • After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
+    <div style='
+        background:linear-gradient(135deg,rgba(0,212,255,0.10),rgba(0,255,157,0.05));
+        border:1px solid rgba(0,212,255,0.45);
+        border-left:5px solid #00d4ff;
+        border-radius:14px;
+        padding:1.1rem 1.3rem;
+        margin:0.6rem 0 1.1rem 0;
+        box-shadow:0 0 20px rgba(0,212,255,0.10);
+    '>
+        <div style='
+            font-family:Rajdhani,sans-serif;
+            font-size:1.18rem;
+            font-weight:700;
+            color:#00d4ff;
+            letter-spacing:1.5px;
+            margin-bottom:0.75rem;
+        '>
+            ⚠️ IMPORTANT TESTING GUIDELINES FOR ACCURATE PREDICTION
+        </div>
+
+        <div style='
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:0.65rem;
+        '>
+
+            <div style='background:rgba(10,22,40,0.85);border:1px solid rgba(0,212,255,0.25);border-radius:10px;padding:0.75rem;'>
+                <div style='color:#00ff9d;font-family:Rajdhani,sans-serif;font-weight:700;font-size:0.95rem;'>🔋 BATTERY TYPE</div>
+                <div style='color:#e8f4fd;font-size:0.83rem;line-height:1.45;margin-top:0.25rem;'>
+                    Use only for <strong>reconditioned Nissan Leaf lithium-ion battery modules</strong>.
+                </div>
+            </div>
+
+            <div style='background:rgba(10,22,40,0.85);border:1px solid rgba(255,107,53,0.25);border-radius:10px;padding:0.75rem;'>
+                <div style='color:#ff6b35;font-family:Rajdhani,sans-serif;font-weight:700;font-size:0.95rem;'>⚡ DISCHARGING TEST</div>
+                <div style='color:#e8f4fd;font-size:0.83rem;line-height:1.45;margin-top:0.25rem;'>
+                    Use a <strong>21 W load</strong> as the reference load condition.
+                </div>
+            </div>
+
+            <div style='background:rgba(10,22,40,0.85);border:1px solid rgba(255,107,53,0.25);border-radius:10px;padding:0.75rem;'>
+                <div style='color:#ff6b35;font-family:Rajdhani,sans-serif;font-weight:700;font-size:0.95rem;'>🔌 HIGHER LOAD OPTION</div>
+                <div style='color:#e8f4fd;font-size:0.83rem;line-height:1.45;margin-top:0.25rem;'>
+                    If higher load is required, connect <strong>two 21 W loads in parallel</strong>.
+                </div>
+            </div>
+
+            <div style='background:rgba(10,22,40,0.85);border:1px solid rgba(0,255,157,0.25);border-radius:10px;padding:0.75rem;'>
+                <div style='color:#00ff9d;font-family:Rajdhani,sans-serif;font-weight:700;font-size:0.95rem;'>☀️ CHARGING TEST</div>
+                <div style='color:#e8f4fd;font-size:0.83rem;line-height:1.45;margin-top:0.25rem;'>
+                    Use a <strong>20 W solar panel</strong> as the reference charging source.
+                </div>
+            </div>
+
+        </div>
+
+        <div style='
+            margin-top:0.75rem;
+            background:rgba(0,212,255,0.08);
+            border:1px dashed rgba(0,212,255,0.35);
+            border-radius:10px;
+            padding:0.8rem 0.9rem;
+            color:#e8f4fd;
+            font-size:0.86rem;
+            line-height:1.55;
+        '>
+            ✅ For more accurate prediction, complete one full <strong>charging or discharging cycle</strong> before entering values.<br>
+            📝 After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
