@@ -621,14 +621,104 @@ with tab1:
     st.markdown("<div class='sec'>◈ ENTER BATTERY MEASUREMENTS</div>", unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='icard'>
-        ⚠️ <strong>Important Instructions for Accurate Prediction</strong><br><br>
-        • This system is designed specifically for <strong>reconditioned Nissan Leaf lithium-ion battery modules</strong>.<br>
-        • For <strong>discharging-based prediction</strong>, use a <strong>21 W load</strong> as the reference load condition.<br>
-        • If a higher load is required, use <strong>two 21 W loads connected in parallel</strong>.<br>
-        • For <strong>charging-based prediction</strong>, use a <strong>20 W solar panel</strong> as the reference charging source.<br>
-        • For more accurate prediction, complete one full charging or discharging cycle before entering values.<br>
-        • After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
+    <style>
+        .guide-box {
+            background: linear-gradient(135deg, rgba(0,212,255,0.10), rgba(0,255,157,0.05));
+            border: 1px solid rgba(0,212,255,0.45);
+            border-left: 5px solid #00d4ff;
+            border-radius: 14px;
+            padding: 1.2rem;
+            margin: 0.7rem 0 1.2rem 0;
+            box-shadow: 0 0 18px rgba(0,212,255,0.12);
+        }
+        .guide-title {
+            font-family: Rajdhani, sans-serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #00d4ff;
+            letter-spacing: 1px;
+            margin-bottom: 1rem;
+        }
+        .guide-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.8rem;
+        }
+        .guide-card {
+            background: #0a1628;
+            border: 1px solid rgba(0,212,255,0.25);
+            border-radius: 10px;
+            padding: 0.8rem;
+        }
+        .guide-card.orange {
+            border-color: rgba(255,107,53,0.30);
+        }
+        .guide-card.green {
+            border-color: rgba(0,255,157,0.30);
+        }
+        .guide-card-title {
+            font-family: Rajdhani, sans-serif;
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 0.3rem;
+        }
+        .guide-card-title.green {
+            color: #00ff9d;
+        }
+        .guide-card-title.orange {
+            color: #ff6b35;
+        }
+        .guide-text {
+            color: #e8f4fd;
+            font-size: 0.83rem;
+            line-height: 1.5;
+        }
+        .guide-note {
+            margin-top: 1rem;
+            background: rgba(0,212,255,0.08);
+            border: 1px dashed rgba(0,212,255,0.35);
+            border-radius: 10px;
+            padding: 0.9rem;
+            color: #e8f4fd;
+            font-size: 0.86rem;
+            line-height: 1.7;
+        }
+        @media (max-width: 900px) {
+            .guide-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+
+    <div class="guide-box">
+        <div class="guide-title">⚠️ IMPORTANT TESTING GUIDELINES FOR ACCURATE PREDICTION</div>
+
+        <div class="guide-grid">
+            <div class="guide-card">
+                <div class="guide-card-title green">🔋 BATTERY TYPE</div>
+                <div class="guide-text">Use only for <strong>reconditioned Nissan Leaf lithium-ion battery modules</strong>.</div>
+            </div>
+
+            <div class="guide-card orange">
+                <div class="guide-card-title orange">⚡ DISCHARGING TEST</div>
+                <div class="guide-text">Use a <strong>21 W load</strong> as the reference load condition.</div>
+            </div>
+
+            <div class="guide-card orange">
+                <div class="guide-card-title orange">🔌 HIGHER LOAD OPTION</div>
+                <div class="guide-text">If higher load is required, connect <strong>two 21 W loads in parallel</strong>.</div>
+            </div>
+
+            <div class="guide-card green">
+                <div class="guide-card-title green">☀️ CHARGING TEST</div>
+                <div class="guide-text">Use a <strong>20 W solar panel</strong> as the reference charging source.</div>
+            </div>
+        </div>
+
+        <div class="guide-note">
+            ✅ For more accurate prediction, complete one full <strong>charging or discharging cycle</strong> before entering values.<br>
+            📝 After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -637,30 +727,36 @@ with tab1:
     # =====================================================
     st.markdown("<div class='sec'>◈ INITIAL BATTERY CONDITIONS</div>", unsafe_allow_html=True)
 
-    i1, i2, i3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
 
-    with i1:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ INITIAL VOLTAGE (V)</div>", unsafe_allow_html=True)
+    with c1:
         initial_voltage = st.number_input(
-            "Initial Voltage", min_value=6.0, max_value=8.2,
-            value=7.80, step=0.01, format="%.2f",
-            label_visibility="collapsed"
+            "Initial Voltage (V)",
+            min_value=6.0,
+            max_value=8.5,
+            value=7.80,
+            step=0.01,
+            format="%.2f"
         )
 
-    with i2:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 INITIAL CURRENT (A)</div>", unsafe_allow_html=True)
+    with c2:
         initial_current = st.number_input(
-            "Initial Current", min_value=0.0, max_value=10.0,
-            value=1.20, step=0.01, format="%.2f",
-            label_visibility="collapsed"
+            "Initial Current (A)",
+            min_value=0.0,
+            max_value=10.0,
+            value=1.20,
+            step=0.01,
+            format="%.2f"
         )
 
-    with i3:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ INITIAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
+    with c3:
         initial_temperature = st.number_input(
-            "Initial Temperature", min_value=0.0, max_value=80.0,
-            value=30.0, step=0.1, format="%.1f",
-            label_visibility="collapsed"
+            "Initial Temperature (°C)",
+            min_value=0.0,
+            max_value=80.0,
+            value=30.0,
+            step=0.1,
+            format="%.1f"
         )
 
     # =====================================================
@@ -668,16 +764,19 @@ with tab1:
     # =====================================================
     st.markdown("<div class='sec'>◈ FINAL BATTERY CONDITIONS</div>", unsafe_allow_html=True)
 
-    f1, f2, f3 = st.columns(3)
+    c4, c5, c6 = st.columns(3)
 
-    with f1:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ FINAL VOLTAGE (V)</div>", unsafe_allow_html=True)
+    with c4:
         voltage = st.number_input(
-            "Final Voltage", min_value=6.0, max_value=8.2,
-            value=7.40, step=0.01, format="%.2f",
-            label_visibility="collapsed"
+            "Final Voltage (V)",
+            min_value=6.0,
+            max_value=8.5,
+            value=7.40,
+            step=0.01,
+            format="%.2f"
         )
         v_pct = (voltage - V_MIN) / (V_MAX - V_MIN) * 100
+        v_pct = max(0, min(100, v_pct))
         v_color = "#00ff9d" if voltage >= 7.0 else "#ff6b35" if voltage >= 6.5 else "#ff3366"
         st.markdown(f"""
         <div style='background:#0d1f3c;border-radius:6px;height:8px;margin-top:5px;'>
@@ -688,12 +787,14 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    with f2:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 FINAL CURRENT (A)</div>", unsafe_allow_html=True)
+    with c5:
         current = st.number_input(
-            "Final Current", min_value=0.0, max_value=10.0,
-            value=1.20, step=0.01, format="%.2f",
-            label_visibility="collapsed"
+            "Final Current (A)",
+            min_value=0.0,
+            max_value=10.0,
+            value=1.20,
+            step=0.01,
+            format="%.2f"
         )
         curr_color = "#ff6b35" if current > 0 else "#7ba7cc"
         st.markdown(f"""
@@ -702,12 +803,14 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    with f3:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ FINAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
+    with c6:
         temperature = st.number_input(
-            "Final Temperature", min_value=0.0, max_value=80.0,
-            value=35.0, step=0.1, format="%.1f",
-            label_visibility="collapsed"
+            "Final Temperature (°C)",
+            min_value=0.0,
+            max_value=80.0,
+            value=35.0,
+            step=0.1,
+            format="%.1f"
         )
         temp_color = "#00ff9d" if temperature <= 40 else "#ff6b35" if temperature <= 50 else "#ff3366"
         temp_status = "✅ Normal" if temperature <= 40 else "⚠️ Warm" if temperature <= 50 else "❌ Hot"
@@ -718,30 +821,31 @@ with tab1:
         """, unsafe_allow_html=True)
 
     # =====================================================
-    # PROCESS INFORMATION
+    # PROCESS DETAILS
     # =====================================================
     st.markdown("<div class='sec'>◈ PROCESS INFORMATION</div>", unsafe_allow_html=True)
 
-    p1, p2 = st.columns(2)
+    pc1, pc2 = st.columns(2)
 
-    with p1:
+    with pc1:
         cycle_time = st.number_input(
             "Charging / Discharging Time (Minutes)",
             min_value=0.0,
             max_value=10000.0,
             value=60.0,
-            step=1.0,
-            format="%.1f",
-            help="Enter the time taken to complete the charging or discharging process."
+            step=1.0
         )
 
-    with p2:
+    with pc2:
         state_str = st.selectbox(
             "Battery State",
             ["DISCHARGING", "CHARGING"],
             help="Select the actual operating state of the battery"
         )
 
+    # =====================================================
+    # AUTO CALCULATIONS
+    # =====================================================
     power = round(voltage * current, 3)
     state_enc = 1 if state_str == "DISCHARGING" else 0
     cycle_count = 1
@@ -752,14 +856,14 @@ with tab1:
 
     st.markdown(f"""
     <div class='icard' style='margin-top:1rem;'>
-        🔄 <strong>Auto-calculated Parameters</strong><br><br>
-        <strong style='color:#00d4ff;'>Power = {power:.2f}W</strong> &nbsp;|&nbsp;
+        🔄 <strong>Auto Calculated Parameters</strong><br><br>
+        ⚡ Power = <strong style='color:#00d4ff;'>{power:.2f} W</strong> &nbsp;|&nbsp;
         <strong style='color:#00ff9d;'>State = {state_str}</strong> &nbsp;|&nbsp;
         <strong style='color:#7ba7cc;'>Voltage SoH ≈ {v_pct:.1f}%</strong><br><br>
-        📉 <strong style='color:#00d4ff;'>Voltage Change = {voltage_change:.2f}V</strong> &nbsp;|&nbsp;
-        🌡️ <strong style='color:#ff6b35;'>Temperature Change = {temperature_change:.1f}°C</strong> &nbsp;|&nbsp;
-        🔌 <strong style='color:#00ff9d;'>Average Current = {avg_current:.2f}A</strong> &nbsp;|&nbsp;
-        ⏱️ <strong style='color:#7ba7cc;'>Process Time = {cycle_time:.1f} min</strong>
+        📉 Voltage Change = <strong style='color:#00ff9d;'>{voltage_change:.2f} V</strong> &nbsp;|&nbsp;
+        🌡️ Temperature Change = <strong style='color:#ff6b35;'>{temperature_change:.1f} °C</strong> &nbsp;|&nbsp;
+        🔌 Average Current = <strong style='color:#00ff9d;'>{avg_current:.2f} A</strong> &nbsp;|&nbsp;
+        ⏱️ Process Time = <strong style='color:#7ba7cc;'>{cycle_time:.1f} Minutes</strong>
     </div>
     """, unsafe_allow_html=True)
 
