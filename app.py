@@ -618,35 +618,52 @@ with tab1:
             )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='sec'>◈ ENTER BATTERY MEASUREMENTS</div>", unsafe_allow_html=True)
 
     # =====================================================
-    # IMPORTANT INSTRUCTIONS — SAFE NATIVE STREAMLIT UI
+    # PROFESSIONAL TESTING GUIDELINES
     # =====================================================
     st.markdown("""
-    <div class='icard' style='border-left:5px solid #00d4ff; box-shadow:0 0 18px rgba(0,212,255,0.16);'>
+    <div class='icard' style='border-left:5px solid #00d4ff; box-shadow:0 0 18px rgba(0,212,255,0.16); margin-bottom:0.8rem;'>
         <span style='color:#00d4ff; font-family:Rajdhani,sans-serif; font-size:1.15rem; font-weight:700; letter-spacing:1px;'>
-            ⚠️ IMPORTANT TESTING GUIDELINES FOR ACCURATE PREDICTION
+            ⚠️ TESTING GUIDELINES — USE THESE CONDITIONS BEFORE PREDICTION
         </span>
     </div>
     """, unsafe_allow_html=True)
 
-    g1, g2 = st.columns(2)
+    tg1, tg2, tg3, tg4 = st.columns(4)
 
-    with g1:
-        st.info("🔋 **BATTERY TYPE**\n\nUse only for **reconditioned Nissan Leaf lithium-ion battery modules**.")
-        st.warning("🔌 **HIGHER LOAD OPTION**\n\nIf higher load is required, connect **two 21 W loads in parallel**.")
+    with tg1:
+        st.info(
+            "🔋 **Battery Type**\n\n"
+            "Use only for **reconditioned Nissan Leaf lithium-ion battery modules**."
+        )
 
-    with g2:
-        st.warning("⚡ **DISCHARGING TEST**\n\nUse a **21 W load** as the reference load condition.")
-        st.success("☀️ **CHARGING TEST**\n\nUse a **20 W solar panel** as the reference charging source.")
+    with tg2:
+        st.warning(
+            "⚡ **Discharging Test**\n\n"
+            "Use a **21 W load** as the reference load condition."
+        )
+
+    with tg3:
+        st.warning(
+            "🔌 **Higher Load Option**\n\n"
+            "For higher load, connect **two 21 W loads in parallel**."
+        )
+
+    with tg4:
+        st.success(
+            "☀️ **Charging Test**\n\n"
+            "Use a **20 W solar panel** as the reference charging source."
+        )
 
     st.markdown("""
-    <div class='icard' style='border-left:5px solid #00ff9d; margin-top:0.6rem;'>
-        ✅ For more accurate prediction, complete one full <strong>charging or discharging cycle</strong> before entering values.<br>
-        📝 After completing the cycle, enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
+    <div class='icard' style='border-left:5px solid #00ff9d; margin-top:0.4rem; margin-bottom:1rem;'>
+        ✅ Complete one full <strong>charging or discharging cycle</strong> before entering values for more accurate prediction.<br>
+        📝 Then enter the <strong>initial and final voltage, current, temperature</strong>, and the <strong>process time</strong>.
     </div>
     """, unsafe_allow_html=True)
+
+    st.markdown("<div class='sec'>◈ ENTER BATTERY MEASUREMENTS</div>", unsafe_allow_html=True)
 
     # =====================================================
     # INITIAL PARAMETERS
