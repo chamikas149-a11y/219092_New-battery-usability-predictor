@@ -635,25 +635,25 @@ with tab1:
     with tg1:
         st.info(
             "🔋 **Battery Type**\n\n"
-            "Use only for **Reconditioned Nissan Leaf lithium-ion Battery Modules**."
+            "Use only for **reconditioned Nissan Leaf lithium-ion battery modules**."
         )
 
     with tg2:
         st.warning(
             "⚡ **Discharging Test**\n\n"
-            "Use a **21 W Load** as the Reference Load Condition."
+            "Use a **21 W load** as the reference load condition."
         )
 
     with tg3:
         st.warning(
             "🔌 **Higher Load Option**\n\n"
-            "For higher Load, Connect **Two 21 W loads in Parallel**."
+            "For higher load, connect **two 21 W loads in parallel**."
         )
 
     with tg4:
         st.success(
             "☀️ **Charging Test**\n\n"
-            "Use a **20 W Solar Panel** as the Reference Charging Source."
+            "Use a **20 W solar panel** as the reference charging source."
         )
 
     st.markdown("""
@@ -782,17 +782,37 @@ with tab1:
     voltage_change = abs(initial_voltage - voltage)
     temperature_change = temperature - initial_temperature
     avg_current = (initial_current + current) / 2
+    avg_temperature = (initial_temperature + temperature) / 2
+
+    # Practical prediction logic:
+    # - In DISCHARGING mode, final voltage is treated as cutoff voltage.
+    #   Therefore, initial voltage is used for model prediction to avoid false low SoH at 6V cutoff.
+    # - In CHARGING mode, final voltage represents the charged condition, so final voltage is used.
+    if state_str == "DISCHARGING":
+        prediction_voltage = initial_voltage
+        prediction_note = "Discharging mode: Initial voltage is used for prediction; final voltage is treated as cutoff voltage."
+    else:
+        prediction_voltage = voltage
+        prediction_note = "Charging mode: Final voltage is used for prediction because it represents the charged condition."
+
+    prediction_current = avg_current
+    prediction_temperature = avg_temperature
+    prediction_power = round(prediction_voltage * prediction_current, 3)
 
     st.markdown(f"""
     <div class='icard' style='margin-top:1rem;'>
         🔄 <strong>Auto-calculated Parameters</strong><br><br>
-        <strong style='color:#00d4ff;'>Power = {power:.2f}W</strong> &nbsp;|&nbsp;
+        <strong style='color:#00d4ff;'>Measured Power = {power:.2f}W</strong> &nbsp;|&nbsp;
         <strong style='color:#00ff9d;'>State = {state_str}</strong> &nbsp;|&nbsp;
         <strong style='color:#7ba7cc;'>Voltage SoH ≈ {v_pct:.1f}%</strong><br><br>
         📉 <strong style='color:#00d4ff;'>Voltage Change = {voltage_change:.2f}V</strong> &nbsp;|&nbsp;
         🌡️ <strong style='color:#ff6b35;'>Temperature Change = {temperature_change:.1f}°C</strong> &nbsp;|&nbsp;
         🔌 <strong style='color:#00ff9d;'>Average Current = {avg_current:.2f}A</strong> &nbsp;|&nbsp;
-        ⏱️ <strong style='color:#7ba7cc;'>Process Time = {cycle_time:.1f} min</strong>
+        ⏱️ <strong style='color:#7ba7cc;'>Process Time = {cycle_time:.1f} min</strong><br><br>
+        🧠 <strong style='color:#00d4ff;'>Prediction Logic:</strong> {prediction_note}<br>
+        📌 <strong style='color:#7ba7cc;'>Model Input:</strong>
+        V={prediction_voltage:.2f}V, I={prediction_current:.2f}A,
+        T={prediction_temperature:.1f}°C, P={prediction_power:.2f}W
     </div>
     """, unsafe_allow_html=True)
 
@@ -821,16 +841,31 @@ with tab1:
         else:
             with st.spinner("🧠 Running LSTM analysis..."):
                 soh, usability, probs = predict_one(
-                    voltage, current, power, temperature,
-                    cycle_count, state_enc, scaler, lstm_reg, lstm_cls
+                    prediction_voltage,
+                    prediction_current,
+                    prediction_power,
+                    prediction_temperature,
+                    cycle_count,
+                    state_enc,
+                    scaler,
+                    lstm_reg,
+                    lstm_cls
                 )
 
             color = CLASS_COLORS[usability]
             css = {'Good': 'pred-g', 'Fair': 'pred-f', 'Poor': 'pred-p'}[usability]
             emoji = {'Good': '✅', 'Fair': '⚠️', 'Poor': '❌'}[usability]
-            recs = get_recommendations(usability, soh, voltage, temperature, current, state_str)
+            recs = get_recommendations(usability, soh, prediction_voltage, prediction_temperature, prediction_current, state_str)
 
             st.markdown("<div class='sec'>◈ PREDICTION RESULTS</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class='icard' style='border-left:4px solid #00ff9d;'>
+                🧠 <strong>Prediction Logic Used:</strong> {prediction_note}<br>
+                📌 <strong>Model Prediction Inputs:</strong>
+                Voltage={prediction_voltage:.2f}V, Current={prediction_current:.2f}A,
+                Temperature={prediction_temperature:.1f}°C, Power={prediction_power:.2f}W
+            </div>
+            """, unsafe_allow_html=True)
 
             c1, c2 = st.columns([1, 1])
             with c1:
