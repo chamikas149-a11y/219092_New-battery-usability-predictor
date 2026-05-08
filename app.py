@@ -510,34 +510,46 @@ def calculate_practical_usability(
             notes.append("Very high discharge current detected; heavy-load stress strongly reduces usability.")
 
         # 2) Current retention score — checks current drop from initial to final.
-        # Healthy/usable module should maintain current reasonably well during the discharge test.
-        if current_retention >= 0.90:
-            retention_score = 95
-            notes.append("Current retention is excellent; the battery sustained the load well.")
-        elif current_retention >= 0.75:
-            retention_score = 75
-            notes.append("Current retention is acceptable, but a moderate current drop was observed.")
-        elif current_retention >= 0.60:
-            retention_score = 50
-            notes.append("Current retention is weak; the battery may be losing load delivery capability.")
-        elif current_retention >= 0.45:
-            retention_score = 30
-            notes.append("Current retention is poor; significant current drop indicates degradation.")
+        # Based on your collected discharge data, current normally changes only about 0.0–0.2 A.
+        # Therefore, a drop greater than 0.2 A is treated as abnormal and reduces usability.
+        current_drop_percent = (current_change / max(initial_current, 0.01)) * 100
+
+        if current_change <= 0.10 and current_retention >= 0.94:
+            retention_score = 98
+            notes.append("Current is highly stable; current drop is within the normal observed range.")
+        elif current_change <= 0.20 and current_retention >= 0.88:
+            retention_score = 90
+            notes.append("Current is acceptable; current drop is close to the normal observed limit.")
+        elif current_change <= 0.30 and current_retention >= 0.80:
+            retention_score = 65
+            notes.append("Current drop is above the normal observed range; usability is reduced.")
+        elif current_change <= 0.50 and current_retention >= 0.65:
+            retention_score = 40
+            notes.append("Significant current drop detected; battery may not sustain load properly.")
+        elif current_change <= 0.80 and current_retention >= 0.50:
+            retention_score = 25
+            notes.append("Large current drop detected; this indicates weak load-sustaining ability.")
         else:
-            retention_score = 15
-            notes.append("Current retention is critical; battery cannot sustain the load properly.")
+            retention_score = 10
+            notes.append("Critical current drop detected; battery cannot maintain the load reliably.")
 
         # 3) Combine average current and retention.
-        # Retention is given strong effect because current drop is a practical degradation indicator.
-        current_score = (0.45 * avg_current_score) + (0.55 * retention_score)
+        # Current retention is given dominant effect because your real data shows stable current behavior.
+        current_score = (0.25 * avg_current_score) + (0.75 * retention_score)
 
-        # Extra penalty for absolute current instability.
-        if current_change > 1.5:
+        # Extra penalty for abnormal current drop according to the real observed maximum (~0.2 A).
+        if current_change > 0.80:
+            current_score -= 35
+            notes.append("Severe current instability penalty applied.")
+        elif current_change > 0.50:
             current_score -= 25
-            notes.append("Large current variation detected during discharge; load/battery behavior may be unstable.")
-        elif current_change > 0.8:
-            current_score -= 12
-            notes.append("Moderate current variation detected during discharge.")
+            notes.append("Strong current instability penalty applied.")
+        elif current_change > 0.30:
+            current_score -= 15
+            notes.append("Moderate current instability penalty applied.")
+        elif current_change > 0.20:
+            current_score -= 8
+            notes.append("Small penalty applied because current drop exceeded the normal observed limit.")
 
     else:
         # Charging current score — based on current level and stability.
@@ -625,9 +637,9 @@ def calculate_practical_usability(
     # Model SoH remains important, but cycle time and thermal/load behavior are added
     # to avoid wrong usability decisions from voltage-only interpretation.
     practical_soh = (
-        0.35 * model_soh +
+        0.30 * model_soh +
         0.30 * time_score +
-        0.20 * current_score +
+        0.25 * current_score +
         0.10 * temp_score +
         0.05 * voltage_score
     )
@@ -636,6 +648,16 @@ def calculate_practical_usability(
     if temp_score <= 25:
         practical_soh = min(practical_soh, 40)
         notes.append("Safety cap applied due to critical temperature.")
+    if state == "DISCHARGING" and current_change > 0.50:
+        practical_soh = min(practical_soh, 45)
+        notes.append("Usability cap applied because current drop is much higher than the normal observed range.")
+    elif state == "DISCHARGING" and current_change > 0.30:
+        practical_soh = min(practical_soh, 60)
+        notes.append("Usability cap applied because current drop is clearly above the normal observed range.")
+    elif state == "DISCHARGING" and current_change > 0.20:
+        practical_soh = min(practical_soh, 68)
+        notes.append("Usability cap applied because current drop exceeded the observed stable-current limit.")
+
     if current_score <= 25:
         practical_soh = min(practical_soh, 40)
         notes.append("Strong current cap applied due to invalid or highly stressful current behavior.")
@@ -664,6 +686,7 @@ def calculate_practical_usability(
         "avg_current": avg_current,
         "current_change": current_change,
         "current_retention": current_retention,
+        "current_drop_percent": current_drop_percent if state == "DISCHARGING" else (current_change / max(initial_current, 0.01) * 100),
         "avg_temperature": avg_temperature,
         "temperature_change": temp_change,
         "voltage_change": voltage_change,
@@ -1143,8 +1166,9 @@ with tab1:
                 🔌 <strong>Current Analysis:</strong>
                 Average Current = <strong style='color:#00ff9d;'>{cycle_scores["avg_current"]:.2f}A</strong> |
                 Current Change = <strong style='color:#ff6b35;'>{cycle_scores["current_change"]:.2f}A</strong> |
-                Current Retention = <strong style='color:#00d4ff;'>{cycle_scores["current_retention"]*100:.1f}%</strong><br>
-                📌 Current retention now has strong influence on practical usability. If final current drops strongly compared with initial current, usability will reduce.
+                Current Retention = <strong style='color:#00d4ff;'>{cycle_scores["current_retention"]*100:.1f}%</strong> |
+                Drop = <strong style='color:#ff3366;'>{cycle_scores["current_drop_percent"]:.1f}%</strong><br>
+                📌 In your real discharge data, current variation is normally about 0.0–0.2A. If the current drop exceeds 0.2A, usability is reduced.
             </div>
             """, unsafe_allow_html=True)
 
