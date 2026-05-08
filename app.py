@@ -482,34 +482,66 @@ def calculate_practical_usability(
     # -------------------------------
     # Current/load score
     # -------------------------------
+    # Current is now treated as an important usability factor.
+    # For a 21 W discharge load, the practical expected current is normally around
+    # 1.5 A to 3.5 A depending on the module voltage. Very low current means weak
+    # load delivery, while very high current means stress/heavy-load condition.
+    current_change = abs(final_current - initial_current)
+
     if state == "DISCHARGING":
-        # Your collected data show current does not vary strongly during discharge.
-        # Therefore current is used mainly as a load-validity and stress indicator.
         if avg_current < 0.3:
-            current_score = 25
-            notes.append("Average current is too low for a valid discharge-load test.")
-        elif avg_current < 1.0:
+            current_score = 15
+            notes.append("Average discharge current is extremely low; battery may not be supplying the load properly.")
+        elif avg_current < 0.8:
+            current_score = 30
+            notes.append("Average discharge current is too low for a reliable 21 W load test.")
+        elif avg_current < 1.5:
             current_score = 55
-            notes.append("Average current is lower than expected for the reference load.")
+            notes.append("Average discharge current is lower than the expected reference-load region.")
         elif avg_current <= 3.5:
-            current_score = 88
-            notes.append("Average current is within the expected discharge-load region.")
+            current_score = 92
+            notes.append("Average discharge current is within the expected 21 W reference-load region.")
         elif avg_current <= 5.0:
-            current_score = 65
-            notes.append("High discharge current detected; load stress may reduce usability.")
+            current_score = 60
+            notes.append("High discharge current detected; load stress reduces practical usability.")
         else:
-            current_score = 40
-            notes.append("Very high discharge current detected; battery is under heavy stress.")
+            current_score = 25
+            notes.append("Very high discharge current detected; heavy-load stress strongly reduces usability.")
+
+        # In the collected discharge data, current normally does not vary strongly.
+        # A large current change during the same cycle is treated as an instability penalty.
+        if current_change > 1.5:
+            current_score -= 25
+            notes.append("Large current variation detected during discharge; load/battery behavior may be unstable.")
+        elif current_change > 0.8:
+            current_score -= 12
+            notes.append("Moderate current variation detected during discharge.")
+
     else:
         if avg_current < 0.05:
-            current_score = 35
+            current_score = 25
             notes.append("Charging current is too low; check solar panel or wiring.")
+        elif avg_current < 0.2:
+            current_score = 50
+            notes.append("Charging current is weak; charging condition may be poor.")
         elif avg_current <= 2.5:
-            current_score = 85
-            notes.append("Charging current is within expected practical range.")
-        else:
-            current_score = 65
+            current_score = 88
+            notes.append("Charging current is within the expected practical range.")
+        elif avg_current <= 4.0:
+            current_score = 60
             notes.append("High charging current detected; monitor temperature and safety.")
+        else:
+            current_score = 35
+            notes.append("Very high charging current detected; safety stress reduces usability.")
+
+        if current_change > 1.5:
+            current_score -= 18
+            notes.append("Large charging current variation detected; check solar panel stability or wiring.")
+        elif current_change > 0.8:
+            current_score -= 8
+            notes.append("Moderate charging current variation detected.")
+
+    current_score = float(np.clip(current_score, 0, 100))
 
     # -------------------------------
     # Temperature score
@@ -557,9 +589,9 @@ def calculate_practical_usability(
     # Model SoH remains important, but cycle time and thermal/load behavior are added
     # to avoid wrong usability decisions from voltage-only interpretation.
     practical_soh = (
-        0.45 * model_soh +
+        0.35 * model_soh +
         0.30 * time_score +
-        0.10 * current_score +
+        0.20 * current_score +
         0.10 * temp_score +
         0.05 * voltage_score
     )
@@ -568,9 +600,12 @@ def calculate_practical_usability(
     if temp_score <= 25:
         practical_soh = min(practical_soh, 40)
         notes.append("Safety cap applied due to critical temperature.")
-    if current_score <= 30:
-        practical_soh = min(practical_soh, 45)
-        notes.append("Validity cap applied due to very low/invalid current.")
+    if current_score <= 25:
+        practical_soh = min(practical_soh, 40)
+        notes.append("Strong current cap applied due to invalid or highly stressful current behavior.")
+    elif current_score <= 40:
+        practical_soh = min(practical_soh, 55)
+        notes.append("Current cap applied due to weak or unstable current behavior.")
     if state == "DISCHARGING" and cycle_time_min < 30:
         practical_soh = min(practical_soh, 45)
         notes.append("Usability cap applied due to short discharge duration.")
@@ -591,6 +626,7 @@ def calculate_practical_usability(
         "voltage_score": voltage_score,
         "time_per_volt": time_per_volt,
         "avg_current": avg_current,
+        "current_change": current_change,
         "avg_temperature": avg_temperature,
         "temperature_change": temp_change,
         "voltage_change": voltage_change,
@@ -1005,7 +1041,7 @@ with tab1:
                 <strong>Base LSTM Class:</strong> {model_usability}<br>
                 ⚙️ <strong>Practical Cycle-Adjusted SoH:</strong> {soh:.1f}% &nbsp;|&nbsp;
                 <strong>Practical Usability:</strong> {usability}<br>
-                📌 <strong>Reason:</strong> Time, average current, temperature change, and cutoff behavior are considered with the LSTM output.
+                📌 <strong>Reason:</strong> Time, current/load behavior, temperature change, and cutoff behavior are considered with the LSTM output.
             </div>
             """, unsafe_allow_html=True)
 
@@ -1064,6 +1100,15 @@ with tab1:
                         f"<div class='mlbl'>{label}</div></div>",
                         unsafe_allow_html=True
                     )
+
+            st.markdown(f"""
+            <div class='icard' style='border-left:4px solid #00d4ff; margin-top:0.8rem;'>
+                🔌 <strong>Current Analysis:</strong>
+                Average Current = <strong style='color:#00ff9d;'>{cycle_scores["avg_current"]:.2f}A</strong> |
+                Current Change = <strong style='color:#ff6b35;'>{cycle_scores["current_change"]:.2f}A</strong><br>
+                📌 Current now has stronger influence on practical usability because weak current delivery or heavy-load stress directly affects battery usability.
+            </div>
+            """, unsafe_allow_html=True)
 
             for note in cycle_notes[:6]:
                 st.markdown(f"<div class='icard'>• {note}</div>", unsafe_allow_html=True)
