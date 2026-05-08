@@ -482,34 +482,56 @@ def calculate_practical_usability(
     # -------------------------------
     # Current/load score
     # -------------------------------
-    # Current is now treated as an important usability factor.
-    # For a 21 W discharge load, the practical expected current is normally around
-    # 1.5 A to 3.5 A depending on the module voltage. Very low current means weak
-    # load delivery, while very high current means stress/heavy-load condition.
+    # Current is treated as an important practical usability factor.
+    # For discharge testing, the key point is not only the average current,
+    # but also how well the battery can retain/sustain the current until the end of the cycle.
     current_change = abs(final_current - initial_current)
+    current_retention = final_current / max(initial_current, 0.01)
 
     if state == "DISCHARGING":
+        # 1) Average current score — checks whether the battery is operating in the expected load region.
         if avg_current < 0.3:
-            current_score = 15
+            avg_current_score = 15
             notes.append("Average discharge current is extremely low; battery may not be supplying the load properly.")
         elif avg_current < 0.8:
-            current_score = 30
+            avg_current_score = 30
             notes.append("Average discharge current is too low for a reliable 21 W load test.")
         elif avg_current < 1.5:
-            current_score = 55
+            avg_current_score = 55
             notes.append("Average discharge current is lower than the expected reference-load region.")
         elif avg_current <= 3.5:
-            current_score = 92
+            avg_current_score = 92
             notes.append("Average discharge current is within the expected 21 W reference-load region.")
         elif avg_current <= 5.0:
-            current_score = 60
+            avg_current_score = 60
             notes.append("High discharge current detected; load stress reduces practical usability.")
         else:
-            current_score = 25
+            avg_current_score = 25
             notes.append("Very high discharge current detected; heavy-load stress strongly reduces usability.")
 
-        # In the collected discharge data, current normally does not vary strongly.
-        # A large current change during the same cycle is treated as an instability penalty.
+        # 2) Current retention score — checks current drop from initial to final.
+        # Healthy/usable module should maintain current reasonably well during the discharge test.
+        if current_retention >= 0.90:
+            retention_score = 95
+            notes.append("Current retention is excellent; the battery sustained the load well.")
+        elif current_retention >= 0.75:
+            retention_score = 75
+            notes.append("Current retention is acceptable, but a moderate current drop was observed.")
+        elif current_retention >= 0.60:
+            retention_score = 50
+            notes.append("Current retention is weak; the battery may be losing load delivery capability.")
+        elif current_retention >= 0.45:
+            retention_score = 30
+            notes.append("Current retention is poor; significant current drop indicates degradation.")
+        else:
+            retention_score = 15
+            notes.append("Current retention is critical; battery cannot sustain the load properly.")
+
+        # 3) Combine average current and retention.
+        # Retention is given strong effect because current drop is a practical degradation indicator.
+        current_score = (0.45 * avg_current_score) + (0.55 * retention_score)
+
+        # Extra penalty for absolute current instability.
         if current_change > 1.5:
             current_score -= 25
             notes.append("Large current variation detected during discharge; load/battery behavior may be unstable.")
@@ -518,21 +540,35 @@ def calculate_practical_usability(
             notes.append("Moderate current variation detected during discharge.")
 
     else:
+        # Charging current score — based on current level and stability.
         if avg_current < 0.05:
-            current_score = 25
+            avg_current_score = 25
             notes.append("Charging current is too low; check solar panel or wiring.")
         elif avg_current < 0.2:
-            current_score = 50
+            avg_current_score = 50
             notes.append("Charging current is weak; charging condition may be poor.")
         elif avg_current <= 2.5:
-            current_score = 88
+            avg_current_score = 88
             notes.append("Charging current is within the expected practical range.")
         elif avg_current <= 4.0:
-            current_score = 60
+            avg_current_score = 60
             notes.append("High charging current detected; monitor temperature and safety.")
         else:
-            current_score = 35
+            avg_current_score = 35
             notes.append("Very high charging current detected; safety stress reduces usability.")
+
+        # For charging, current retention is less direct than discharging,
+        # but large current drop still indicates unstable charging condition.
+        if current_retention >= 0.70:
+            retention_score = 85
+        elif current_retention >= 0.45:
+            retention_score = 60
+            notes.append("Charging current dropped noticeably during the cycle.")
+        else:
+            retention_score = 35
+            notes.append("Charging current dropped strongly; check panel, wiring, or battery condition.")
+
+        current_score = (0.65 * avg_current_score) + (0.35 * retention_score)
 
         if current_change > 1.5:
             current_score -= 18
@@ -627,6 +663,7 @@ def calculate_practical_usability(
         "time_per_volt": time_per_volt,
         "avg_current": avg_current,
         "current_change": current_change,
+        "current_retention": current_retention,
         "avg_temperature": avg_temperature,
         "temperature_change": temp_change,
         "voltage_change": voltage_change,
@@ -1105,8 +1142,9 @@ with tab1:
             <div class='icard' style='border-left:4px solid #00d4ff; margin-top:0.8rem;'>
                 🔌 <strong>Current Analysis:</strong>
                 Average Current = <strong style='color:#00ff9d;'>{cycle_scores["avg_current"]:.2f}A</strong> |
-                Current Change = <strong style='color:#ff6b35;'>{cycle_scores["current_change"]:.2f}A</strong><br>
-                📌 Current now has stronger influence on practical usability because weak current delivery or heavy-load stress directly affects battery usability.
+                Current Change = <strong style='color:#ff6b35;'>{cycle_scores["current_change"]:.2f}A</strong> |
+                Current Retention = <strong style='color:#00d4ff;'>{cycle_scores["current_retention"]*100:.1f}%</strong><br>
+                📌 Current retention now has strong influence on practical usability. If final current drops strongly compared with initial current, usability will reduce.
             </div>
             """, unsafe_allow_html=True)
 
@@ -1285,7 +1323,7 @@ with tab4:
     st.markdown("""
     <div class='icard'>
         🧠 The practical model uses <strong>Voltage</strong> as the main health indicator,
-        <strong>Current</strong> as load/stress information, and
+        <strong>Current retention</strong> as load-sustainability information, and
         <strong>Temperature</strong> as a safety indicator.
     </div>
     <div class='icard'>
