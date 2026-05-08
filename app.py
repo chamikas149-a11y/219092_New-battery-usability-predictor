@@ -417,6 +417,187 @@ def get_input_warnings(voltage, current, temperature, state):
 
     return warnings_list
 
+
+def calculate_practical_usability(
+    model_soh,
+    model_usability,
+    initial_voltage,
+    final_voltage,
+    initial_current,
+    final_current,
+    initial_temperature,
+    final_temperature,
+    cycle_time_min,
+    state
+):
+    """
+    Practical dashboard-level correction.
+    This does not retrain the LSTM. It combines model SoH with cycle evidence:
+    discharge/charge time, current/load validity, and temperature stress.
+    """
+    voltage_change = abs(initial_voltage - final_voltage)
+    avg_current = (initial_current + final_current) / 2
+    avg_temperature = (initial_temperature + final_temperature) / 2
+    temp_change = final_temperature - initial_temperature
+
+    notes = []
+
+    # Avoid division by zero
+    voltage_window = max(voltage_change, 0.10)
+    time_per_volt = cycle_time_min / voltage_window if cycle_time_min > 0 else 0
+
+    # -------------------------------
+    # Time score
+    # -------------------------------
+    if state == "DISCHARGING":
+        # For a 21 W reference load, longer time to reach cutoff indicates better usable capacity.
+        # These ranges are practical dashboard thresholds and can be tuned after more module tests.
+        if cycle_time_min < 30:
+            time_score = 25
+            notes.append("Short discharge time detected: battery may have low usable capacity.")
+        elif cycle_time_min < 60:
+            time_score = 45
+            notes.append("Moderate-low discharge time detected.")
+        elif cycle_time_min < 120:
+            time_score = 65
+            notes.append("Acceptable discharge duration.")
+        elif cycle_time_min < 240:
+            time_score = 82
+            notes.append("Good discharge duration.")
+        else:
+            time_score = 92
+            notes.append("Very good discharge duration.")
+    else:
+        # In charging, extremely short or very long time can both indicate abnormal behavior.
+        if cycle_time_min < 30:
+            time_score = 50
+            notes.append("Charging time is very short; check whether the cycle was fully completed.")
+        elif cycle_time_min <= 300:
+            time_score = 85
+            notes.append("Charging duration is within a practical range.")
+        else:
+            time_score = 70
+            notes.append("Long charging duration detected; check module condition or panel performance.")
+
+    # -------------------------------
+    # Current/load score
+    # -------------------------------
+    if state == "DISCHARGING":
+        # Your collected data show current does not vary strongly during discharge.
+        # Therefore current is used mainly as a load-validity and stress indicator.
+        if avg_current < 0.3:
+            current_score = 25
+            notes.append("Average current is too low for a valid discharge-load test.")
+        elif avg_current < 1.0:
+            current_score = 55
+            notes.append("Average current is lower than expected for the reference load.")
+        elif avg_current <= 3.5:
+            current_score = 88
+            notes.append("Average current is within the expected discharge-load region.")
+        elif avg_current <= 5.0:
+            current_score = 65
+            notes.append("High discharge current detected; load stress may reduce usability.")
+        else:
+            current_score = 40
+            notes.append("Very high discharge current detected; battery is under heavy stress.")
+    else:
+        if avg_current < 0.05:
+            current_score = 35
+            notes.append("Charging current is too low; check solar panel or wiring.")
+        elif avg_current <= 2.5:
+            current_score = 85
+            notes.append("Charging current is within expected practical range.")
+        else:
+            current_score = 65
+            notes.append("High charging current detected; monitor temperature and safety.")
+
+    # -------------------------------
+    # Temperature score
+    # -------------------------------
+    if avg_temperature >= 60 or final_temperature >= 60:
+        temp_score = 20
+        notes.append("Critical temperature level detected.")
+    elif avg_temperature > 45 or final_temperature > 45:
+        temp_score = 50
+        notes.append("High temperature condition detected; usability should be reduced.")
+    elif temp_change > 12:
+        temp_score = 60
+        notes.append("Large temperature rise detected during the cycle.")
+    elif temp_change > 7:
+        temp_score = 75
+        notes.append("Moderate temperature rise detected.")
+    else:
+        temp_score = 90
+        notes.append("Temperature behavior is acceptable.")
+
+    # -------------------------------
+    # Voltage-change/cycle validity score
+    # -------------------------------
+    if state == "DISCHARGING":
+        if final_voltage <= 6.2:
+            voltage_score = 85
+            notes.append("Final voltage is close to the discharge cutoff region.")
+        elif final_voltage > initial_voltage:
+            voltage_score = 35
+            notes.append("Final voltage is higher than initial voltage in discharging mode; check entered values.")
+        else:
+            voltage_score = 70
+            notes.append("Discharge cycle did not reach the 6 V cutoff region; prediction is partial-cycle based.")
+    else:
+        if final_voltage >= initial_voltage:
+            voltage_score = 85
+            notes.append("Final voltage increased during charging.")
+        else:
+            voltage_score = 35
+            notes.append("Final voltage is lower than initial voltage in charging mode; check entered values.")
+
+    # -------------------------------
+    # Final practical SoH score
+    # -------------------------------
+    # Model SoH remains important, but cycle time and thermal/load behavior are added
+    # to avoid wrong usability decisions from voltage-only interpretation.
+    practical_soh = (
+        0.45 * model_soh +
+        0.30 * time_score +
+        0.10 * current_score +
+        0.10 * temp_score +
+        0.05 * voltage_score
+    )
+
+    # Safety and invalid-test caps
+    if temp_score <= 25:
+        practical_soh = min(practical_soh, 40)
+        notes.append("Safety cap applied due to critical temperature.")
+    if current_score <= 30:
+        practical_soh = min(practical_soh, 45)
+        notes.append("Validity cap applied due to very low/invalid current.")
+    if state == "DISCHARGING" and cycle_time_min < 30:
+        practical_soh = min(practical_soh, 45)
+        notes.append("Usability cap applied due to short discharge duration.")
+
+    practical_soh = float(np.clip(practical_soh, 0, 100))
+
+    if practical_soh >= 70 and temp_score > 50 and current_score > 50:
+        practical_usability = "Good"
+    elif practical_soh >= 45 and temp_score > 25:
+        practical_usability = "Fair"
+    else:
+        practical_usability = "Poor"
+
+    cycle_scores = {
+        "time_score": time_score,
+        "current_score": current_score,
+        "temperature_score": temp_score,
+        "voltage_score": voltage_score,
+        "time_per_volt": time_per_volt,
+        "avg_current": avg_current,
+        "avg_temperature": avg_temperature,
+        "temperature_change": temp_change,
+        "voltage_change": voltage_change,
+    }
+
+    return practical_soh, practical_usability, cycle_scores, notes
+
 def get_recommendations(usability, soh, voltage, temperature, current, state):
     power = voltage * current
     recs = {
@@ -633,28 +814,16 @@ with tab1:
     tg1, tg2, tg3, tg4 = st.columns(4)
 
     with tg1:
-        st.info(
-            "🔋 **Battery Type**\n\n"
-            "Use only for **reconditioned Nissan Leaf lithium-ion battery modules**."
-        )
+        st.info("🔋 **Battery Type**\n\nUse only for **reconditioned Nissan Leaf lithium-ion battery modules**.")
 
     with tg2:
-        st.warning(
-            "⚡ **Discharging Test**\n\n"
-            "Use a **21 W load** as the reference load condition."
-        )
+        st.warning("⚡ **Discharging Test**\n\nUse a **21 W load** as the reference load condition.")
 
     with tg3:
-        st.warning(
-            "🔌 **Higher Load Option**\n\n"
-            "For higher load, connect **two 21 W loads in parallel**."
-        )
+        st.warning("🔌 **Higher Load Option**\n\nFor higher load, connect **two 21 W loads in parallel**.")
 
     with tg4:
-        st.success(
-            "☀️ **Charging Test**\n\n"
-            "Use a **20 W solar panel** as the reference charging source."
-        )
+        st.success("☀️ **Charging Test**\n\nUse a **20 W solar panel** as the reference charging source.")
 
     st.markdown("""
     <div class='icard' style='border-left:5px solid #00ff9d; margin-top:0.4rem; margin-bottom:1rem;'>
@@ -674,27 +843,15 @@ with tab1:
 
     with i1:
         st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ INITIAL VOLTAGE (V)</div>", unsafe_allow_html=True)
-        initial_voltage = st.number_input(
-            "Initial Voltage", min_value=6.0, max_value=8.2,
-            value=7.80, step=0.01, format="%.2f",
-            label_visibility="collapsed"
-        )
+        initial_voltage = st.number_input("Initial Voltage", min_value=6.0, max_value=8.2, value=7.80, step=0.01, format="%.2f", label_visibility="collapsed")
 
     with i2:
         st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 INITIAL CURRENT (A)</div>", unsafe_allow_html=True)
-        initial_current = st.number_input(
-            "Initial Current", min_value=0.0, max_value=10.0,
-            value=1.20, step=0.01, format="%.2f",
-            label_visibility="collapsed"
-        )
+        initial_current = st.number_input("Initial Current", min_value=0.0, max_value=10.0, value=1.20, step=0.01, format="%.2f", label_visibility="collapsed")
 
     with i3:
         st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ INITIAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
-        initial_temperature = st.number_input(
-            "Initial Temperature", min_value=0.0, max_value=80.0,
-            value=30.0, step=0.1, format="%.1f",
-            label_visibility="collapsed"
-        )
+        initial_temperature = st.number_input("Initial Temperature", min_value=0.0, max_value=80.0, value=30.0, step=0.1, format="%.1f", label_visibility="collapsed")
 
     # =====================================================
     # FINAL PARAMETERS
@@ -704,30 +861,23 @@ with tab1:
     f1, f2, f3 = st.columns(3)
 
     with f1:
-        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ FINAL VOLTAGE (V)</div>", unsafe_allow_html=True)
-        voltage = st.number_input(
-            "Final Voltage", min_value=6.0, max_value=8.2,
-            value=7.40, step=0.01, format="%.2f",
-            label_visibility="collapsed"
-        )
+        st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>⚡ FINAL / CUTOFF VOLTAGE (V)</div>", unsafe_allow_html=True)
+        voltage = st.number_input("Final Voltage", min_value=6.0, max_value=8.2, value=6.00, step=0.01, format="%.2f", label_visibility="collapsed")
         v_pct = (voltage - V_MIN) / (V_MAX - V_MIN) * 100
+        v_pct = max(0, min(100, v_pct))
         v_color = "#00ff9d" if voltage >= 7.0 else "#ff6b35" if voltage >= 6.5 else "#ff3366"
         st.markdown(f"""
         <div style='background:#0d1f3c;border-radius:6px;height:8px;margin-top:5px;'>
             <div style='background:{v_color};width:{v_pct:.0f}%;height:8px;border-radius:6px;'></div>
         </div>
         <div style='text-align:center;font-family:Share Tech Mono;font-size:0.75rem;color:{v_color};margin-top:4px;'>
-            Voltage SoH ≈ {v_pct:.1f}% | {voltage:.2f}V
+            Final/Cutoff Voltage = {voltage:.2f}V
         </div>
         """, unsafe_allow_html=True)
 
     with f2:
         st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🔌 FINAL CURRENT (A)</div>", unsafe_allow_html=True)
-        current = st.number_input(
-            "Final Current", min_value=0.0, max_value=10.0,
-            value=1.20, step=0.01, format="%.2f",
-            label_visibility="collapsed"
-        )
+        current = st.number_input("Final Current", min_value=0.0, max_value=10.0, value=1.20, step=0.01, format="%.2f", label_visibility="collapsed")
         curr_color = "#ff6b35" if current > 0 else "#7ba7cc"
         st.markdown(f"""
         <div style='text-align:center;font-family:Share Tech Mono;font-size:0.78rem;color:{curr_color};margin-top:8px;background:rgba(0,0,0,0.2);border-radius:6px;padding:4px;'>
@@ -737,11 +887,7 @@ with tab1:
 
     with f3:
         st.markdown("<div style='text-align:center;font-family:Rajdhani;font-size:1.1rem;color:#00d4ff;letter-spacing:1px;margin-bottom:0.5rem;'>🌡️ FINAL TEMPERATURE (°C)</div>", unsafe_allow_html=True)
-        temperature = st.number_input(
-            "Final Temperature", min_value=0.0, max_value=80.0,
-            value=35.0, step=0.1, format="%.1f",
-            label_visibility="collapsed"
-        )
+        temperature = st.number_input("Final Temperature", min_value=0.0, max_value=80.0, value=35.0, step=0.1, format="%.1f", label_visibility="collapsed")
         temp_color = "#00ff9d" if temperature <= 40 else "#ff6b35" if temperature <= 50 else "#ff3366"
         temp_status = "✅ Normal" if temperature <= 40 else "⚠️ Warm" if temperature <= 50 else "❌ Hot"
         st.markdown(f"""
@@ -758,24 +904,14 @@ with tab1:
     p1, p2 = st.columns(2)
 
     with p1:
-        cycle_time = st.number_input(
-            "Charging / Discharging Time (Minutes)",
-            min_value=0.0,
-            max_value=10000.0,
-            value=60.0,
-            step=1.0,
-            format="%.1f",
-            help="Enter the time taken to complete the charging or discharging process."
-        )
+        cycle_time = st.number_input("Charging / Discharging Time (Minutes)", min_value=0.0, max_value=10000.0, value=60.0, step=1.0, format="%.1f", help="Enter the time taken to complete the charging or discharging process.")
 
     with p2:
-        state_str = st.selectbox(
-            "Battery State",
-            ["DISCHARGING", "CHARGING"],
-            help="Select the actual operating state of the battery"
-        )
+        state_str = st.selectbox("Battery State", ["DISCHARGING", "CHARGING"], help="Select the actual operating state of the battery")
 
-    power = round(voltage * current, 3)
+    # =====================================================
+    # AUTO CALCULATIONS + PRACTICAL MODEL INPUT LOGIC
+    # =====================================================
     state_enc = 1 if state_str == "DISCHARGING" else 0
     cycle_count = 1
 
@@ -784,33 +920,29 @@ with tab1:
     avg_current = (initial_current + current) / 2
     avg_temperature = (initial_temperature + temperature) / 2
 
-    # Practical prediction logic:
-    # - In DISCHARGING mode, final voltage is treated as cutoff voltage.
-    #   Therefore, initial voltage is used for model prediction to avoid false low SoH at 6V cutoff.
-    # - In CHARGING mode, final voltage represents the charged condition, so final voltage is used.
     if state_str == "DISCHARGING":
         prediction_voltage = initial_voltage
-        prediction_note = "Discharging mode: Initial voltage is used for prediction; final voltage is treated as cutoff voltage."
+        prediction_note = "Discharging mode: initial voltage is used for LSTM prediction; final voltage is treated as cutoff voltage."
     else:
         prediction_voltage = voltage
-        prediction_note = "Charging mode: Final voltage is used for prediction because it represents the charged condition."
+        prediction_note = "Charging mode: final voltage is used for LSTM prediction because it represents the charged condition."
 
     prediction_current = avg_current
     prediction_temperature = avg_temperature
     prediction_power = round(prediction_voltage * prediction_current, 3)
+    measured_power = round(voltage * current, 3)
 
     st.markdown(f"""
     <div class='icard' style='margin-top:1rem;'>
-        🔄 <strong>Auto-calculated Parameters</strong><br><br>
-        <strong style='color:#00d4ff;'>Measured Power = {power:.2f}W</strong> &nbsp;|&nbsp;
-        <strong style='color:#00ff9d;'>State = {state_str}</strong> &nbsp;|&nbsp;
-        <strong style='color:#7ba7cc;'>Voltage SoH ≈ {v_pct:.1f}%</strong><br><br>
+        🔄 <strong>Cycle-Based Practical Inputs</strong><br><br>
+        <strong style='color:#00d4ff;'>Measured Final Power = {measured_power:.2f}W</strong> &nbsp;|&nbsp;
+        <strong style='color:#00ff9d;'>State = {state_str}</strong><br><br>
         📉 <strong style='color:#00d4ff;'>Voltage Change = {voltage_change:.2f}V</strong> &nbsp;|&nbsp;
         🌡️ <strong style='color:#ff6b35;'>Temperature Change = {temperature_change:.1f}°C</strong> &nbsp;|&nbsp;
         🔌 <strong style='color:#00ff9d;'>Average Current = {avg_current:.2f}A</strong> &nbsp;|&nbsp;
         ⏱️ <strong style='color:#7ba7cc;'>Process Time = {cycle_time:.1f} min</strong><br><br>
-        🧠 <strong style='color:#00d4ff;'>Prediction Logic:</strong> {prediction_note}<br>
-        📌 <strong style='color:#7ba7cc;'>Model Input:</strong>
+        🧠 <strong style='color:#00d4ff;'>LSTM Input Logic:</strong> {prediction_note}<br>
+        📌 <strong style='color:#7ba7cc;'>LSTM Input:</strong>
         V={prediction_voltage:.2f}V, I={prediction_current:.2f}A,
         T={prediction_temperature:.1f}°C, P={prediction_power:.2f}W
     </div>
@@ -823,12 +955,7 @@ with tab1:
     input_warnings = get_input_warnings(voltage, current, temperature, state_str)
     for icon, text, level in input_warnings:
         bc = {"green": "#00ff9d", "orange": "#ff6b35", "red": "#ff3366", "cyan": "#00d4ff"}[level]
-        bg = {
-            "green": "rgba(0,255,157,0.06)",
-            "orange": "rgba(255,107,53,0.06)",
-            "red": "rgba(255,51,102,0.06)",
-            "cyan": "rgba(0,212,255,0.06)"
-        }[level]
+        bg = {"green": "rgba(0,255,157,0.06)", "orange": "rgba(255,107,53,0.06)", "red": "rgba(255,51,102,0.06)", "cyan": "rgba(0,212,255,0.06)"}[level]
         st.markdown(f"""
         <div class='warn-card' style='background:{bg};border-color:{bc};color:var(--text);'>
             {icon} {text}
@@ -839,8 +966,8 @@ with tab1:
         if not loaded:
             st.error("⚠️ Models not loaded! Please refresh the page.")
         else:
-            with st.spinner("🧠 Running LSTM analysis..."):
-                soh, usability, probs = predict_one(
+            with st.spinner("🧠 Running LSTM + practical cycle analysis..."):
+                model_soh, model_usability, probs = predict_one(
                     prediction_voltage,
                     prediction_current,
                     prediction_power,
@@ -852,18 +979,33 @@ with tab1:
                     lstm_cls
                 )
 
+                soh, usability, cycle_scores, cycle_notes = calculate_practical_usability(
+                    model_soh,
+                    model_usability,
+                    initial_voltage,
+                    voltage,
+                    initial_current,
+                    current,
+                    initial_temperature,
+                    temperature,
+                    cycle_time,
+                    state_str
+                )
+
             color = CLASS_COLORS[usability]
             css = {'Good': 'pred-g', 'Fair': 'pred-f', 'Poor': 'pred-p'}[usability]
             emoji = {'Good': '✅', 'Fair': '⚠️', 'Poor': '❌'}[usability]
             recs = get_recommendations(usability, soh, prediction_voltage, prediction_temperature, prediction_current, state_str)
 
             st.markdown("<div class='sec'>◈ PREDICTION RESULTS</div>", unsafe_allow_html=True)
+
             st.markdown(f"""
             <div class='icard' style='border-left:4px solid #00ff9d;'>
-                🧠 <strong>Prediction Logic Used:</strong> {prediction_note}<br>
-                📌 <strong>Model Prediction Inputs:</strong>
-                Voltage={prediction_voltage:.2f}V, Current={prediction_current:.2f}A,
-                Temperature={prediction_temperature:.1f}°C, Power={prediction_power:.2f}W
+                🧠 <strong>Base LSTM SoH:</strong> {model_soh:.1f}% &nbsp;|&nbsp;
+                <strong>Base LSTM Class:</strong> {model_usability}<br>
+                ⚙️ <strong>Practical Cycle-Adjusted SoH:</strong> {soh:.1f}% &nbsp;|&nbsp;
+                <strong>Practical Usability:</strong> {usability}<br>
+                📌 <strong>Reason:</strong> Time, average current, temperature change, and cutoff behavior are considered with the LSTM output.
             </div>
             """, unsafe_allow_html=True)
 
@@ -874,7 +1016,7 @@ with tab1:
             with c2:
                 st.markdown(f"""
                 <div class='pred-box {css}' style='margin-top:0.5rem;'>
-                    <div class='ptitle'>USABILITY STATUS</div>
+                    <div class='ptitle'>PRACTICAL USABILITY STATUS</div>
                     <div style='font-size:3.5rem;margin:0.3rem 0;'>{emoji}</div>
                     <div style='color:{color};font-family:Rajdhani,sans-serif;font-size:1.8rem;font-weight:700;letter-spacing:3px;'>
                         {usability.upper()}
@@ -908,6 +1050,24 @@ with tab1:
                 )
                 st.plotly_chart(fig_p, use_container_width=True)
 
+            st.markdown("<div class='sec'>◈ CYCLE HEALTH BREAKDOWN</div>", unsafe_allow_html=True)
+            b1, b2, b3, b4 = st.columns(4)
+            for col, label, value, clr in [
+                (b1, "TIME SCORE", cycle_scores["time_score"], "c"),
+                (b2, "CURRENT SCORE", cycle_scores["current_score"], "g"),
+                (b3, "TEMP SCORE", cycle_scores["temperature_score"], "o"),
+                (b4, "VOLTAGE SCORE", cycle_scores["voltage_score"], "r"),
+            ]:
+                with col:
+                    st.markdown(
+                        f"<div class='mcard {clr}'><div class='mval {clr}'>{value:.0f}</div>"
+                        f"<div class='mlbl'>{label}</div></div>",
+                        unsafe_allow_html=True
+                    )
+
+            for note in cycle_notes[:6]:
+                st.markdown(f"<div class='icard'>• {note}</div>", unsafe_allow_html=True)
+
             st.markdown("<div class='sec'>◈ RECOMMENDATIONS</div>", unsafe_allow_html=True)
             bc = {'Good': '#00ff9d', 'Fair': '#ff6b35', 'Poor': '#ff3366'}[usability]
             bg = {'Good': 'rgba(0,255,157,0.05)', 'Fair': 'rgba(255,107,53,0.05)', 'Poor': 'rgba(255,51,102,0.05)'}[usability]
@@ -920,7 +1080,7 @@ with tab1:
 
             st.markdown("<div class='sec'>◈ DOWNLOAD REPORT</div>", unsafe_allow_html=True)
             report = generate_report(
-                voltage, current, power, temperature,
+                prediction_voltage, prediction_current, prediction_power, prediction_temperature,
                 soh, usability, probs, recs, state_str
             )
             fname = f"LeafBattery_Report_{usability}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
