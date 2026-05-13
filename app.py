@@ -694,6 +694,121 @@ def calculate_practical_usability(
 
     return practical_soh, practical_usability, cycle_scores, notes
 
+def calculate_rul_estimation(
+    soh_prediction,
+    cycle_count,
+    cycle_time_min,
+    avg_temperature,
+    temperature_change,
+    avg_current,
+    current_change,
+    current_retention,
+    voltage_change,
+    state,
+    cycles_per_month=30,
+    eol_threshold=60
+):
+    """
+    Engineering-based Remaining Useful Life (RUL) estimation layer.
+    This is a post-processing layer only. It does not retrain the LSTM model.
+    RUL is estimated using predicted/corrected SoH and operational stress indicators.
+    """
+    notes = []
+    cycle_count = max(float(cycle_count), 1.0)
+    cycles_per_month = max(float(cycles_per_month), 1.0)
+
+    # Base degradation rate from present SoH and used cycle count
+    base_deg_rate = (100.0 - float(soh_prediction)) / cycle_count
+    base_deg_rate = float(np.clip(base_deg_rate, 0.02, 5.0))
+
+    # Temperature stress: high temperature and sudden rise increase degradation speed
+    temp_stress = 0.0
+    if avg_temperature > 45 or temperature_change > 12:
+        temp_stress += 0.08
+        notes.append("High thermal stress increases the estimated degradation rate.")
+    elif avg_temperature > 40 or temperature_change > 7:
+        temp_stress += 0.04
+        notes.append("Moderate temperature stress was considered in RUL estimation.")
+    elif avg_temperature < 15:
+        temp_stress += 0.02
+        notes.append("Low temperature condition may reduce stable battery performance.")
+
+    # Current stress: large current change or weak retention means higher degradation risk
+    current_stress = 0.0
+    if state == "DISCHARGING":
+        if current_change > 0.50 or current_retention < 0.65:
+            current_stress += 0.10
+            notes.append("High current instability reduces the estimated remaining cycles.")
+        elif current_change > 0.20 or current_retention < 0.88:
+            current_stress += 0.05
+            notes.append("Small current instability was added as a degradation stress factor.")
+    else:
+        if current_change > 1.50:
+            current_stress += 0.08
+            notes.append("Large charging current variation increases degradation stress.")
+        elif current_change > 0.80:
+            current_stress += 0.04
+            notes.append("Moderate charging current variation was considered.")
+
+    if avg_current > 4.0:
+        current_stress += 0.06
+        notes.append("High current operation adds extra load stress.")
+    elif avg_current > 3.0:
+        current_stress += 0.03
+        notes.append("Moderate high-current operation adds small load stress.")
+
+    # Voltage stress: deep voltage movement / very short process indicates weak usable capacity
+    voltage_stress = 0.0
+    if state == "DISCHARGING" and cycle_time_min < 30:
+        voltage_stress += 0.08
+        notes.append("Short discharge duration adds voltage/capacity stress.")
+    elif voltage_change > 1.5 and cycle_time_min < 60:
+        voltage_stress += 0.05
+        notes.append("Fast voltage drop increases the estimated degradation rate.")
+    elif voltage_change > 1.0:
+        voltage_stress += 0.02
+        notes.append("Voltage movement was considered in RUL estimation.")
+
+    adjusted_deg_rate = base_deg_rate + temp_stress + current_stress + voltage_stress
+    adjusted_deg_rate = float(np.clip(adjusted_deg_rate, 0.02, 6.0))
+
+    # Remaining useful cycles until selected end-of-life SoH threshold
+    if soh_prediction <= eol_threshold:
+        remaining_cycles = 0.0
+        notes.append("SoH is already near or below the selected end-of-life threshold.")
+    else:
+        remaining_cycles = (float(soh_prediction) - eol_threshold) / adjusted_deg_rate
+
+    remaining_cycles = float(max(0.0, remaining_cycles))
+    remaining_months = remaining_cycles / cycles_per_month
+    remaining_years = remaining_months / 12.0
+
+    if remaining_months >= 18:
+        service_label = "Long Service Life"
+    elif remaining_months >= 6:
+        service_label = "Moderate Service Life"
+    elif remaining_months >= 3:
+        service_label = "Short Service Life"
+    elif remaining_months > 0:
+        service_label = "Near End-of-Life"
+    else:
+        service_label = "End-of-Life Region"
+
+    return {
+        "base_deg_rate": base_deg_rate,
+        "temp_stress": temp_stress,
+        "current_stress": current_stress,
+        "voltage_stress": voltage_stress,
+        "adjusted_deg_rate": adjusted_deg_rate,
+        "remaining_cycles": remaining_cycles,
+        "remaining_months": remaining_months,
+        "remaining_years": remaining_years,
+        "service_label": service_label,
+        "eol_threshold": eol_threshold,
+        "cycles_per_month": cycles_per_month,
+        "notes": notes,
+    }
+
 def get_recommendations(usability, soh, voltage, temperature, current, state):
     power = voltage * current
     recs = {
@@ -724,7 +839,7 @@ def get_recommendations(usability, soh, voltage, temperature, current, state):
     }
     return recs[usability]
 
-def generate_report(voltage, current, power, temperature, soh, usability, probs, recs, state):
+def generate_report(voltage, current, power, temperature, soh, usability, probs, recs, state, rul_info=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     color_map = {'Good': '#00aa66', 'Fair': '#dd6600', 'Poor': '#cc0033'}
     color = color_map[usability]
@@ -749,6 +864,18 @@ def generate_report(voltage, current, power, temperature, soh, usability, probs,
                 <div style="background:{clr};width:{w}%;height:20px;border-radius:4px;"></div>
             </div>
         </div>
+        """
+
+    rul_html = ""
+    if rul_info:
+        rul_html = f"""
+    <div class="section-title">⏳ Remaining Useful Life Estimation</div>
+    <div class="param-grid">
+        <div class="param-item"><div class="param-label">Service Life Status</div><div class="param-value">{rul_info['service_label']}</div></div>
+        <div class="param-item"><div class="param-label">Estimated Remaining Cycles</div><div class="param-value">{rul_info['remaining_cycles']:.0f} cycles</div></div>
+        <div class="param-item"><div class="param-label">Estimated Service Period</div><div class="param-value">{rul_info['remaining_months']:.1f} months</div></div>
+        <div class="param-item"><div class="param-label">Adjusted Degradation Rate</div><div class="param-value">{rul_info['adjusted_deg_rate']:.3f}% / cycle</div></div>
+    </div>
         """
 
     html = f"""<!DOCTYPE html>
@@ -794,6 +921,8 @@ body{{font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f8;color:#333;}}
             <div class="result-label">Practical Usability</div>
         </div>
     </div>
+
+    {rul_html}
 
     <div class="section-title">📊 Class Probabilities</div>
     {prob_html}
@@ -997,7 +1126,7 @@ with tab1:
     # =====================================================
     st.markdown("<div class='sec'>◈ PROCESS INFORMATION</div>", unsafe_allow_html=True)
 
-    p1, p2 = st.columns(2)
+    p1, p2, p3 = st.columns(3)
 
     with p1:
         cycle_time = st.number_input("Charging / Discharging Time (Minutes)", min_value=0.0, max_value=10000.0, value=60.0, step=1.0, format="%.1f", help="Enter the time taken to complete the charging or discharging process.")
@@ -1005,11 +1134,19 @@ with tab1:
     with p2:
         state_str = st.selectbox("Battery State", ["DISCHARGING", "CHARGING"], help="Select the actual operating state of the battery")
 
+    with p3:
+        cycle_count = st.number_input("Battery Cycle Count", min_value=1, max_value=5000, value=150, step=1, help="Enter the estimated number of completed battery cycles. This is used for RUL estimation.")
+
+    r1, r2 = st.columns(2)
+    with r1:
+        cycles_per_month = st.number_input("Expected Cycles per Month", min_value=1, max_value=120, value=30, step=1, help="Used to convert remaining cycles into months.")
+    with r2:
+        eol_threshold = st.number_input("End-of-Life SoH Threshold (%)", min_value=40, max_value=80, value=60, step=1, help="RUL is calculated until this SoH level.")
+
     # =====================================================
     # AUTO CALCULATIONS + PRACTICAL MODEL INPUT LOGIC
     # =====================================================
     state_enc = 1 if state_str == "DISCHARGING" else 0
-    cycle_count = 1
 
     voltage_change = abs(initial_voltage - voltage)
     temperature_change = temperature - initial_temperature
@@ -1088,6 +1225,21 @@ with tab1:
                     state_str
                 )
 
+                rul_info = calculate_rul_estimation(
+                    soh_prediction=soh,
+                    cycle_count=cycle_count,
+                    cycle_time_min=cycle_time,
+                    avg_temperature=cycle_scores["avg_temperature"],
+                    temperature_change=cycle_scores["temperature_change"],
+                    avg_current=cycle_scores["avg_current"],
+                    current_change=cycle_scores["current_change"],
+                    current_retention=cycle_scores["current_retention"],
+                    voltage_change=cycle_scores["voltage_change"],
+                    state=state_str,
+                    cycles_per_month=cycles_per_month,
+                    eol_threshold=eol_threshold
+                )
+
             color = CLASS_COLORS[usability]
             css = {'Good': 'pred-g', 'Fair': 'pred-f', 'Poor': 'pred-p'}[usability]
             emoji = {'Good': '✅', 'Fair': '⚠️', 'Poor': '❌'}[usability]
@@ -1104,6 +1256,36 @@ with tab1:
                 📌 <strong>Reason:</strong> Time, current/load behavior, temperature change, and cutoff behavior are considered with the LSTM output.
             </div>
             """, unsafe_allow_html=True)
+
+            st.markdown("<div class='sec'>◈ REMAINING USEFUL LIFE (RUL) ESTIMATION</div>", unsafe_allow_html=True)
+            rcol1, rcol2, rcol3, rcol4 = st.columns(4)
+            for col, label, value, clr in [
+                (rcol1, "SERVICE LIFE", rul_info["service_label"], "c"),
+                (rcol2, "REMAINING CYCLES", f"{rul_info['remaining_cycles']:.0f}", "g"),
+                (rcol3, "REMAINING MONTHS", f"{rul_info['remaining_months']:.1f}", "o"),
+                (rcol4, "DEG. RATE / CYCLE", f"{rul_info['adjusted_deg_rate']:.3f}%", "r"),
+            ]:
+                with col:
+                    st.markdown(
+                        f"<div class='mcard {clr}'><div class='mval {clr}' style='font-size:1.35rem;'>{value}</div>"
+                        f"<div class='mlbl'>{label}</div></div>",
+                        unsafe_allow_html=True
+                    )
+
+            st.markdown(f"""
+            <div class='icard' style='border-left:4px solid #00ff9d; margin-top:0.8rem;'>
+                ⏳ <strong>RUL Method:</strong> Degradation-rate-based estimation using predicted SoH and operational stress indicators.<br>
+                📉 <strong>Base Degradation Rate:</strong> {rul_info["base_deg_rate"]:.3f}%/cycle |
+                🌡️ <strong>Temperature Stress:</strong> {rul_info["temp_stress"]:.3f} |
+                🔌 <strong>Current Stress:</strong> {rul_info["current_stress"]:.3f} |
+                🔋 <strong>Voltage Stress:</strong> {rul_info["voltage_stress"]:.3f}<br>
+                🎯 <strong>EOL Threshold:</strong> {rul_info["eol_threshold"]:.0f}% SoH |
+                📅 <strong>Usage Assumption:</strong> {rul_info["cycles_per_month"]:.0f} cycles/month
+            </div>
+            """, unsafe_allow_html=True)
+
+            for note in rul_info["notes"][:4]:
+                st.markdown(f"<div class='icard'>• {note}</div>", unsafe_allow_html=True)
 
             c1, c2 = st.columns([1, 1])
             with c1:
@@ -1188,7 +1370,7 @@ with tab1:
             st.markdown("<div class='sec'>◈ DOWNLOAD REPORT</div>", unsafe_allow_html=True)
             report = generate_report(
                 prediction_voltage, prediction_current, prediction_power, prediction_temperature,
-                soh, usability, probs, recs, state_str
+                soh, usability, probs, recs, state_str, rul_info
             )
             fname = f"LeafBattery_Report_{usability}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
             st.download_button(
