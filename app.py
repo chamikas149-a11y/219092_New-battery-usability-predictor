@@ -708,17 +708,15 @@ def calculate_degradation_rul(
     eol_soh=60.0
 ):
     """
-    Degradation-rate-based RUL estimation layer.
+    Literature-supported rule-based approximate service-period estimation layer.
 
-    This layer does not retrain the LSTM model. It estimates future service life
-    using the present predicted/practical SoH and operating stress indicators
-    measured during one charging/discharging test.
+    This is NOT a universal industrial RUL equation. It is an approximate
+    prognostic layer added after the LSTM SoH prediction. It uses the same
+    health-indicator pattern commonly used in battery prognostics literature:
+    SoH + voltage behavior + current stability + temperature behavior + test duration.
 
-    Inputs used:
-    - initial voltage, current, temperature
-    - final voltage, current, temperature
-    - process time
-    - battery operating state
+    Output is shown as a service-period RANGE, not an exact lifetime, because
+    calendar RUL depends on future usage, load, temperature, and cycling pattern.
     """
 
     safe_time = max(cycle_time_min, 1.0)
@@ -726,192 +724,170 @@ def calculate_degradation_rul(
     voltage_change = abs(initial_voltage - final_voltage)
     current_change = abs(initial_current - final_current)
     temp_change = final_temperature - initial_temperature
-
-    avg_current = (initial_current + final_current) / 2
     avg_temperature = (initial_temperature + final_temperature) / 2
 
-    # 1) Voltage degradation speed
-    # Higher voltage drop in a shorter time means the battery is degrading/discharging faster.
-    voltage_deg_per_hour = voltage_change / (safe_time / 60.0)
-
-    # 2) Current instability
-    # Stable current is better. Large current drop or variation increases degradation stress.
+    # Health indicators derived from the practical cycle test
+    voltage_drop_rate = voltage_change / (safe_time / 60.0)  # V/hour
     current_instability = current_change / max(initial_current, 0.05)
+    temperature_rise = max(temp_change, 0)
 
-    # 3) Thermal stress
-    # Temperature rise and high average temperature increase aging stress.
-    temp_rise_stress = max(temp_change, 0) / 10.0
-    high_temp_stress = max(avg_temperature - 35.0, 0) / 20.0
+    # ---------------------------------------------------------
+    # Rule-based operational stress scoring
+    # ---------------------------------------------------------
+    # The aim is to avoid unsupported fixed mathematical weights.
+    # Each indicator contributes low/moderate/high stress points based on
+    # practical battery behavior observed during the cycle.
+    stress_score = 0
+    stress_reasons = []
 
-    # 4) Time factor
-    # Very short discharge time indicates low usable capacity.
+    # Voltage stress: faster voltage drop indicates lower usable capacity.
+    if state == "DISCHARGING":
+        if voltage_drop_rate > 1.5:
+            stress_score += 2
+            stress_reasons.append("High voltage drop rate")
+        elif voltage_drop_rate > 0.8:
+            stress_score += 1
+            stress_reasons.append("Moderate voltage drop rate")
+    else:
+        # In charging, abnormal voltage change is treated more gently.
+        if voltage_change < 0.20 and cycle_time_min > 30:
+            stress_score += 1
+            stress_reasons.append("Weak charging voltage recovery")
+        if final_voltage < initial_voltage:
+            stress_score += 2
+            stress_reasons.append("Voltage decreased during charging")
+
+    # Current stability: large current variation indicates unstable load/charge behavior.
+    if current_instability > 0.35:
+        stress_score += 2
+        stress_reasons.append("High current instability")
+    elif current_instability > 0.15:
+        stress_score += 1
+        stress_reasons.append("Moderate current instability")
+
+    # Temperature stress: high average temperature or large rise accelerates aging.
+    if avg_temperature > 50 or temperature_rise > 15:
+        stress_score += 2
+        stress_reasons.append("High thermal stress")
+    elif avg_temperature > 40 or temperature_rise > 8:
+        stress_score += 1
+        stress_reasons.append("Moderate thermal stress")
+
+    # Duration stress: short discharge/abnormal charging duration indicates weak usable capacity.
     if state == "DISCHARGING":
         if cycle_time_min < 30:
-            time_stress = 1.00
+            stress_score += 2
+            stress_reasons.append("Very short discharge duration")
         elif cycle_time_min < 60:
-            time_stress = 0.65
-        elif cycle_time_min < 120:
-            time_stress = 0.35
-        else:
-            time_stress = 0.15
+            stress_score += 1
+            stress_reasons.append("Short discharge duration")
     else:
-        # For charging, abnormal too-short or too-long charging is treated as stress.
-        if cycle_time_min < 30:
-            time_stress = 0.55
-        elif cycle_time_min <= 300:
-            time_stress = 0.20
-        else:
-            time_stress = 0.45
+        if cycle_time_min < 30 or cycle_time_min > 300:
+            stress_score += 1
+            stress_reasons.append("Abnormal charging duration")
 
-    # Weighted stress index. These weights can be tuned after collecting more real battery tests.
-    stress_index = (
-        0.40 * voltage_deg_per_hour +
-        0.30 * current_instability +
-        0.20 * temp_rise_stress +
-        0.10 * high_temp_stress +
-        0.10 * time_stress
-    )
-
-    # Convert stress index to an estimated degradation rate in SoH % per equivalent cycle.
-    # Baseline 0.05% per cycle prevents unrealistic infinite RUL in very stable tests.
-    estimated_deg_rate = 0.05 + (stress_index * 0.18)
-
-    # Safety additions for harsh conditions
-    if avg_temperature > 45:
-        estimated_deg_rate += 0.05
-    if avg_temperature > 55:
-        estimated_deg_rate += 0.10
-    if state == "DISCHARGING" and current_change > 0.20:
-        estimated_deg_rate += 0.03
-    if state == "DISCHARGING" and current_change > 0.50:
-        estimated_deg_rate += 0.08
-    if cycle_time_min < 30:
-        estimated_deg_rate += 0.08
-
-    estimated_deg_rate = float(np.clip(estimated_deg_rate, 0.03, 2.00))
+    # Convert score to stress level
+    if stress_score <= 2:
+        stress_level = "LOW"
+        range_shift = 0
+    elif stress_score <= 5:
+        stress_level = "MODERATE"
+        range_shift = 1
+    else:
+        stress_level = "HIGH"
+        range_shift = 2
 
     usable_soh_margin = max(soh - eol_soh, 0)
 
+    # ---------------------------------------------------------
+    # Base service-period range selected from predicted SoH
+    # ---------------------------------------------------------
+    # This is a rule-based approximation. Second-life batteries with higher
+    # predicted SoH are assigned a longer base service range, then reduced if
+    # operational stress is moderate/high.
+    ranges = [
+        "Near End-of-Life",
+        "0–3 months",
+        "3–6 months",
+        "6–12 months",
+        "12–18 months",
+        "18–24 months",
+    ]
+
+    if soh < eol_soh:
+        base_index = 0
+    elif soh < 70:
+        base_index = 2
+    elif soh < 80:
+        base_index = 3
+    elif soh < 90:
+        base_index = 4
+    else:
+        base_index = 5
+
+    adjusted_index = max(0, base_index - range_shift)
+    service_life_range = ranges[adjusted_index]
+
+    # Numeric display values for cards/charts only
+    range_midpoints = {
+        "Near End-of-Life": 0.5,
+        "0–3 months": 1.5,
+        "3–6 months": 4.5,
+        "6–12 months": 9.0,
+        "12–18 months": 15.0,
+        "18–24 months": 21.0,
+    }
+    remaining_months = range_midpoints[service_life_range]
+    remaining_years = remaining_months / 12.0
+
+    if adjusted_index >= 5:
+        rul_status = "Long Service Life"
+    elif adjusted_index == 4:
+        rul_status = "Good Service Life"
+    elif adjusted_index == 3:
+        rul_status = "Moderate Service Life"
+    elif adjusted_index == 2:
+        rul_status = "Short Service Life"
+    else:
+        rul_status = "Near End-of-Life"
+
+    # Approximate remaining equivalent cycles is optional and only indicative.
+    # It is not used to calculate the final calendar service range.
     if usable_soh_margin <= 0:
         remaining_cycles = 0.0
-        remaining_months = 0.0
-        service_months_low = 0.0
-        service_months_high = 1.0
-        service_life_range = "0–1 month"
-        rul_status = "Near End-of-Life"
     else:
-        remaining_cycles = usable_soh_margin / estimated_deg_rate
+        nominal_deg_per_cycle = 0.12 if stress_level == "LOW" else 0.18 if stress_level == "MODERATE" else 0.28
+        remaining_cycles = usable_soh_margin / nominal_deg_per_cycle
 
-        # ---------------------------------------------------------
-        # Approximate remaining service period prediction
-        # ---------------------------------------------------------
-        # Exact calendar life needs long-term aging/RUL labels. Since this app
-        # uses a one-cycle practical test, the dashboard predicts a realistic
-        # service PERIOD RANGE using predicted SoH + operational stress.
-        #
-        # Base range comes from the remaining SoH margin. The stress factor
-        # expands or reduces the period according to voltage decay speed,
-        # current instability, temperature stress, and short process time.
-        if soh >= 90:
-            base_low, base_high = 18.0, 24.0
-        elif soh >= 80:
-            base_low, base_high = 12.0, 18.0
-        elif soh >= 70:
-            base_low, base_high = 6.0, 12.0
-        elif soh >= 60:
-            base_low, base_high = 3.0, 6.0
-        else:
-            base_low, base_high = 0.0, 3.0
-
-        # Stress factor: lower stress gives longer service period; higher
-        # stress reduces it. These boundaries are dashboard-level engineering
-        # thresholds that can be tuned after collecting more module tests.
-        if stress_index < 0.35:
-            stress_level = "LOW"
-            stress_factor = 1.15
-        elif stress_index < 0.75:
-            stress_level = "MODERATE"
-            stress_factor = 1.00
-        elif stress_index < 1.25:
-            stress_level = "HIGH"
-            stress_factor = 0.75
-        else:
-            stress_level = "SEVERE"
-            stress_factor = 0.55
-
-        # Additional safety reductions for abnormal conditions.
-        if avg_temperature > 45:
-            stress_factor *= 0.85
-        if avg_temperature > 55:
-            stress_factor *= 0.75
-        if state == "DISCHARGING" and current_instability > 0.20:
-            stress_factor *= 0.90
-        if cycle_time_min < 30:
-            stress_factor *= 0.80
-
-        service_months_low = max(0.5, base_low * stress_factor)
-        service_months_high = max(service_months_low + 0.5, base_high * stress_factor)
-
-        # Limit to a defendable display range for second-life battery modules.
-        service_months_low = float(np.clip(service_months_low, 0.5, 30.0))
-        service_months_high = float(np.clip(service_months_high, service_months_low + 0.5, 36.0))
-        remaining_months = (service_months_low + service_months_high) / 2.0
-
-        if service_months_high >= 18:
-            rul_status = "Long Service Life"
-        elif service_months_high >= 12:
-            rul_status = "Good Service Life"
-        elif service_months_high >= 6:
-            rul_status = "Moderate Service Life"
-        elif service_months_high >= 3:
-            rul_status = "Short Service Life"
-        else:
-            rul_status = "Near End-of-Life"
-
-        if service_months_high < 1.0:
-            service_life_range = "<1 month"
-        else:
-            service_life_range = f"{service_months_low:.0f}–{service_months_high:.0f} months"
-
-    remaining_years = remaining_months / 12.0
-    if usable_soh_margin <= 0:
-        stress_level = "SEVERE"
-
-
-    rul_notes = []
-    rul_notes.append("Approximate service period is predicted using predicted SoH plus voltage decay, current instability, temperature stress, and test duration.")
-    rul_notes.append(f"End-of-life threshold is assumed as {eol_soh:.0f}% SoH; output is shown as a range because calendar RUL depends on future usage.")
-    if state == "DISCHARGING":
-        rul_notes.append("Discharging test behavior is more suitable for RUL estimation than charging-only behavior.")
-    else:
-        rul_notes.append("Charging test based RUL is an approximate estimate; discharging test data gives stronger RUL confidence.")
-    if cycle_time_min < 30:
-        rul_notes.append("Short process time increases degradation rate and reduces estimated service life.")
-    if avg_temperature > 45:
-        rul_notes.append("High temperature stress increases estimated degradation rate.")
-    if current_instability > 0.20:
-        rul_notes.append("Current instability is above the preferred stable range, so RUL is reduced.")
+    rul_notes = [
+        "Approximate service period is selected from predicted SoH and adjusted using rule-based operational stress scoring.",
+        f"End-of-life threshold is assumed as {eol_soh:.0f}% SoH for this dashboard-level second-life usability assessment.",
+        "Voltage drop rate, current instability, temperature rise, and test duration are used as health/stress indicators.",
+        "The output is shown as a range because exact calendar RUL requires long-term lifecycle aging data."
+    ]
+    if stress_reasons:
+        rul_notes.append("Stress reasons: " + ", ".join(stress_reasons) + ".")
+    if state == "CHARGING":
+        rul_notes.append("Charging-only RUL estimation has lower confidence than a discharge-cycle-based estimation.")
 
     return {
-        "voltage_deg_per_hour": voltage_deg_per_hour,
-        "current_instability": current_instability,
-        "temp_rise_stress": temp_rise_stress,
-        "high_temp_stress": high_temp_stress,
-        "time_stress": time_stress,
-        "stress_index": float(stress_index),
-        "estimated_deg_rate": estimated_deg_rate,
+        "voltage_drop_rate": float(voltage_drop_rate),
+        "voltage_deg_per_hour": float(voltage_drop_rate),  # kept for old UI compatibility
+        "current_instability": float(current_instability),
+        "temperature_rise": float(temperature_rise),
+        "temp_rise_stress": float(temperature_rise),
+        "stress_score": int(stress_score),
+        "stress_level": stress_level,
+        "base_service_range": ranges[base_index],
+        "service_life_range": service_life_range,
         "remaining_cycles": float(remaining_cycles),
         "remaining_months": float(remaining_months),
-        "service_months_low": float(service_months_low),
-        "service_months_high": float(service_months_high),
-        "service_life_range": service_life_range,
         "remaining_years": float(remaining_years),
-        "stress_level": stress_level,
         "rul_status": rul_status,
         "eol_soh": eol_soh,
+        "usable_soh_margin": float(usable_soh_margin),
         "rul_notes": rul_notes,
     }
-
 
 def get_recommendations(usability, soh, voltage, temperature, current, state):
     power = voltage * current
@@ -1410,7 +1386,7 @@ with tab1:
 
             r1, r2, r3, r4 = st.columns(4)
             rul_cards = [
-                (r1, "DEG. RATE", f"{rul_data['estimated_deg_rate']:.3f}%/cycle", "o"),
+                (r1, "STRESS SCORE", f"{rul_data['stress_score']}/8", "o"),
                 (r2, "HEALTH MARGIN", f"{max(soh - rul_data['eol_soh'], 0):.1f}%", "c"),
                 (r3, "SERVICE PERIOD", rul_data["service_life_range"], "g"),
                 (r4, "RUL STATUS", rul_data["rul_status"], "r"),
@@ -1425,14 +1401,15 @@ with tab1:
 
             st.markdown(f"""
             <div class='icard' style='border-left:4px solid #ff6b35; margin-top:0.8rem;'>
-                📉 <strong>RUL Calculation Method:</strong>
-                Voltage Degradation Speed = <strong style='color:#00d4ff;'>{rul_data["voltage_deg_per_hour"]:.3f} V/hour</strong> |
+                📉 <strong>RUL Estimation Method:</strong>
+                Literature-supported rule-based approximate service-period estimation<br>
+                Voltage Drop Rate = <strong style='color:#00d4ff;'>{rul_data["voltage_drop_rate"]:.3f} V/hour</strong> |
                 Current Instability = <strong style='color:#ff6b35;'>{rul_data["current_instability"]:.3f}</strong> |
-                Temperature Stress = <strong style='color:#ff3366;'>{rul_data["temp_rise_stress"]:.3f}</strong><br>
-                ⚙️ <strong>Stress Index:</strong> {rul_data["stress_index"]:.3f} |
-                <strong>End-of-Life Threshold:</strong> {rul_data["eol_soh"]:.0f}% SoH |
+                Temperature Rise = <strong style='color:#ff3366;'>{rul_data["temperature_rise"]:.1f}°C</strong><br>
+                ⚙️ <strong>Stress Score:</strong> {rul_data["stress_score"]}/8 |
                 <strong>Stress Level:</strong> {rul_data["stress_level"]} |
-                <strong>Approx. Service Period:</strong> {rul_data["service_life_range"]}
+                <strong>Base SoH Range:</strong> {rul_data["base_service_range"]} |
+                <strong>Final Approx. Service Period:</strong> {rul_data["service_life_range"]}
             </div>
             """, unsafe_allow_html=True)
 
