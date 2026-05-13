@@ -795,30 +795,92 @@ def calculate_degradation_rul(
     if usable_soh_margin <= 0:
         remaining_cycles = 0.0
         remaining_months = 0.0
+        service_months_low = 0.0
+        service_months_high = 1.0
+        service_life_range = "0–1 month"
         rul_status = "Near End-of-Life"
     else:
         remaining_cycles = usable_soh_margin / estimated_deg_rate
 
-        # Practical service-life conversion:
-        # assume around 30 equivalent cycles per month for dashboard-level estimation.
-        remaining_months = remaining_cycles / 30.0
+        # ---------------------------------------------------------
+        # Approximate remaining service period prediction
+        # ---------------------------------------------------------
+        # Exact calendar life needs long-term aging/RUL labels. Since this app
+        # uses a one-cycle practical test, the dashboard predicts a realistic
+        # service PERIOD RANGE using predicted SoH + operational stress.
+        #
+        # Base range comes from the remaining SoH margin. The stress factor
+        # expands or reduces the period according to voltage decay speed,
+        # current instability, temperature stress, and short process time.
+        if soh >= 90:
+            base_low, base_high = 18.0, 24.0
+        elif soh >= 80:
+            base_low, base_high = 12.0, 18.0
+        elif soh >= 70:
+            base_low, base_high = 6.0, 12.0
+        elif soh >= 60:
+            base_low, base_high = 3.0, 6.0
+        else:
+            base_low, base_high = 0.0, 3.0
 
-        if remaining_months >= 18:
+        # Stress factor: lower stress gives longer service period; higher
+        # stress reduces it. These boundaries are dashboard-level engineering
+        # thresholds that can be tuned after collecting more module tests.
+        if stress_index < 0.35:
+            stress_level = "LOW"
+            stress_factor = 1.15
+        elif stress_index < 0.75:
+            stress_level = "MODERATE"
+            stress_factor = 1.00
+        elif stress_index < 1.25:
+            stress_level = "HIGH"
+            stress_factor = 0.75
+        else:
+            stress_level = "SEVERE"
+            stress_factor = 0.55
+
+        # Additional safety reductions for abnormal conditions.
+        if avg_temperature > 45:
+            stress_factor *= 0.85
+        if avg_temperature > 55:
+            stress_factor *= 0.75
+        if state == "DISCHARGING" and current_instability > 0.20:
+            stress_factor *= 0.90
+        if cycle_time_min < 30:
+            stress_factor *= 0.80
+
+        service_months_low = max(0.5, base_low * stress_factor)
+        service_months_high = max(service_months_low + 0.5, base_high * stress_factor)
+
+        # Limit to a defendable display range for second-life battery modules.
+        service_months_low = float(np.clip(service_months_low, 0.5, 30.0))
+        service_months_high = float(np.clip(service_months_high, service_months_low + 0.5, 36.0))
+        remaining_months = (service_months_low + service_months_high) / 2.0
+
+        if service_months_high >= 18:
             rul_status = "Long Service Life"
-        elif remaining_months >= 12:
+        elif service_months_high >= 12:
             rul_status = "Good Service Life"
-        elif remaining_months >= 6:
+        elif service_months_high >= 6:
             rul_status = "Moderate Service Life"
-        elif remaining_months >= 3:
+        elif service_months_high >= 3:
             rul_status = "Short Service Life"
         else:
             rul_status = "Near End-of-Life"
 
+        if service_months_high < 1.0:
+            service_life_range = "<1 month"
+        else:
+            service_life_range = f"{service_months_low:.0f}–{service_months_high:.0f} months"
+
     remaining_years = remaining_months / 12.0
+    if usable_soh_margin <= 0:
+        stress_level = "SEVERE"
+
 
     rul_notes = []
-    rul_notes.append("RUL is estimated using a degradation-rate layer based on voltage decay, current instability, temperature stress, and predicted SoH.")
-    rul_notes.append(f"End-of-life threshold is assumed as {eol_soh:.0f}% SoH.")
+    rul_notes.append("Approximate service period is predicted using predicted SoH plus voltage decay, current instability, temperature stress, and test duration.")
+    rul_notes.append(f"End-of-life threshold is assumed as {eol_soh:.0f}% SoH; output is shown as a range because calendar RUL depends on future usage.")
     if state == "DISCHARGING":
         rul_notes.append("Discharging test behavior is more suitable for RUL estimation than charging-only behavior.")
     else:
@@ -840,7 +902,11 @@ def calculate_degradation_rul(
         "estimated_deg_rate": estimated_deg_rate,
         "remaining_cycles": float(remaining_cycles),
         "remaining_months": float(remaining_months),
+        "service_months_low": float(service_months_low),
+        "service_months_high": float(service_months_high),
+        "service_life_range": service_life_range,
         "remaining_years": float(remaining_years),
+        "stress_level": stress_level,
         "rul_status": rul_status,
         "eol_soh": eol_soh,
         "rul_notes": rul_notes,
@@ -1340,13 +1406,13 @@ with tab1:
             for note in cycle_notes[:6]:
                 st.markdown(f"<div class='icard'>• {note}</div>", unsafe_allow_html=True)
 
-            st.markdown("<div class='sec'>◈ DEGRADATION-RATE BASED RUL ESTIMATION</div>", unsafe_allow_html=True)
+            st.markdown("<div class='sec'>◈ APPROXIMATE SERVICE PERIOD / RUL PREDICTION</div>", unsafe_allow_html=True)
 
             r1, r2, r3, r4 = st.columns(4)
             rul_cards = [
                 (r1, "DEG. RATE", f"{rul_data['estimated_deg_rate']:.3f}%/cycle", "o"),
-                (r2, "REMAINING CYCLES", f"{rul_data['remaining_cycles']:.0f}", "c"),
-                (r3, "SERVICE LIFE", f"{rul_data['remaining_months']:.1f} months", "g"),
+                (r2, "HEALTH MARGIN", f"{max(soh - rul_data['eol_soh'], 0):.1f}%", "c"),
+                (r3, "SERVICE PERIOD", rul_data["service_life_range"], "g"),
                 (r4, "RUL STATUS", rul_data["rul_status"], "r"),
             ]
             for col, label, value, clr in rul_cards:
@@ -1365,7 +1431,8 @@ with tab1:
                 Temperature Stress = <strong style='color:#ff3366;'>{rul_data["temp_rise_stress"]:.3f}</strong><br>
                 ⚙️ <strong>Stress Index:</strong> {rul_data["stress_index"]:.3f} |
                 <strong>End-of-Life Threshold:</strong> {rul_data["eol_soh"]:.0f}% SoH |
-                <strong>Estimated Years:</strong> {rul_data["remaining_years"]:.2f} years
+                <strong>Stress Level:</strong> {rul_data["stress_level"]} |
+                <strong>Approx. Service Period:</strong> {rul_data["service_life_range"]}
             </div>
             """, unsafe_allow_html=True)
 
